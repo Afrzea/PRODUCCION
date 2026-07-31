@@ -686,8 +686,8 @@ async function saveOrders(){
         return false;
       }
       if(parsed.imageErrors && parsed.imageErrors.length){
-        const codigos = parsed.imageErrors.map(e => e.code).join(', ');
-        alert('⚠️ El pedido se guardó, pero el plano de ' + codigos + ' NO se pudo subir (falló la conexión con Google Drive). Vuelve a abrir el pedido y adjunta el plano de nuevo cuando tengas mejor señal.');
+        const detalle = parsed.imageErrors.map(e => e.code + ': ' + e.error).join('\n');
+        alert('⚠️ El pedido se guardó, pero el plano NO se pudo subir a Google Drive.\n\nDetalle técnico (mándale captura de esto a Claude):\n' + detalle);
       }
       suppressPollUntil = Date.now() + 10000;
       return true;
