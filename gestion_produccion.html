@@ -1020,14 +1020,17 @@ async function createOrder(){
   render();
 }
 
-// Convierte cualquier link de imagen guardado (viejo o nuevo formato) a la ruta
-// confiable que sirve el propio backend, para que siempre se vea la imagen.
+// Convierte cualquier link de imagen guardado (de cualquier formato usado antes)
+// al formato de enlace directo de Google que sí funciona de forma confiable.
 function driveImgUrl(url){
   if(!url) return url;
-  if(url.indexOf('img=') !== -1) return url; // ya viene en el formato correcto
-  const m = url.match(/[?&]id=([a-zA-Z0-9_-]+)/);
-  if(m){
-    return tokenUrl(BACKEND_URL, ACCESS_TOKEN) + '&img=' + m[1];
+  let fileId = null;
+  let m = url.match(/[?&]img=([a-zA-Z0-9_-]+)/);
+  if(m){ fileId = m[1]; }
+  if(!fileId){ m = url.match(/[?&]id=([a-zA-Z0-9_-]+)/); if(m){ fileId = m[1]; } }
+  if(!fileId){ m = url.match(/\/d\/([a-zA-Z0-9_-]+)/); if(m){ fileId = m[1]; } }
+  if(fileId){
+    return 'https://lh3.googleusercontent.com/d/' + fileId;
   }
   return url;
 }
