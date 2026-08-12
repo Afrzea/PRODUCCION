@@ -452,6 +452,40 @@
   </div>
 </div>
 
+<!-- MODAL: editar pedido -->
+<div class="overlay" id="overlayEdit">
+  <div class="modal">
+    <h2>Editar pedido <span class="x" data-close="overlayEdit">&times;</span></h2>
+    <div class="grid2">
+      <div class="field"><label>Cliente</label><input id="e_cliente" type="text" /></div>
+      <div class="field"><label>Producto</label><input id="e_producto" type="text" /></div>
+    </div>
+    <div class="field"><label>Especificaciones / características</label><textarea id="e_specs" placeholder="Medidas, color, material, cantidad, notas de diseño..."></textarea></div>
+    <div class="grid2">
+      <div class="field"><label>Cantidad</label><input id="e_cantidad" type="number" min="1" value="1" /></div>
+      <div class="field"><label>Prioridad</label>
+        <select id="e_prioridad">
+          <option value="media">Media</option>
+          <option value="alta">Alta</option>
+          <option value="baja">Baja</option>
+        </select>
+      </div>
+    </div>
+    <div class="field"><label>Fecha de entrega comprometida</label><input id="e_fecha" type="date" /></div>
+    <div class="field">
+      <label>Plano / imagen del producto</label>
+      <div id="e_imagen_current" style="margin-bottom:8px;"></div>
+      <input id="e_imagen" type="file" accept="image/*" />
+      <div id="e_imagen_preview" style="margin-top:8px;"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" data-close="overlayEdit">Cancelar</button>
+      <button class="btn btn-primary" id="btnSaveEdit">Guardar cambios</button>
+    </div>
+  </div>
+</div>
+
+
 <script>
 const STAGES = [
   {id:'ventas',   label:'Pedido registrado', target:2},
@@ -479,6 +513,7 @@ const BACKEND_URL = 'https://script.google.com/macros/s/AKfycby3EcnFnwEoajb4USnd
 const STORAGE_KEY = 'orders_v1';
 let ORDERS = [];
 let activeOrderId = null;
+let editingOrderId = null;
 let STORAGE_MODE = 'checking'; // 'backend' | 'persistent' | 'memory'
 let ACCESS_TOKEN = '';
 
@@ -1035,6 +1070,84 @@ function driveImgUrl(url){
   return url;
 }
 
+// pendingEditImageData: undefined = sin cambios (dejar el plano actual tal cual),
+// null = el usuario quitó el plano, string (base64) = subió un plano nuevo.
+let pendingEditImageData = undefined;
+
+function openEditModal(id){
+  const o = ORDERS.find(x=>x.id===id);
+  if(!o) return;
+  editingOrderId = id;
+  document.getElementById('e_cliente').value = o.cliente || '';
+  document.getElementById('e_producto').value = o.producto || '';
+  document.getElementById('e_specs').value = o.specs || '';
+  document.getElementById('e_cantidad').value = o.cantidad || 1;
+  document.getElementById('e_prioridad').value = o.prioridad || 'media';
+  document.getElementById('e_fecha').value = o.fechaEntrega || '';
+  pendingEditImageData = undefined;
+
+  const current = document.getElementById('e_imagen_current');
+  if(o.imagen){
+    current.innerHTML = `<img src="${driveImgUrl(o.imagen)}" style="max-width:100%;max-height:160px;border:1px solid var(--border);border-radius:3px;display:block;margin-bottom:6px;" /><span class="danger-link" id="e_removeImgBtn">Quitar este plano</span>`;
+    document.getElementById('e_removeImgBtn').onclick = ()=>{
+      pendingEditImageData = null;
+      current.innerHTML = '<span class="hint">Se quitará el plano al guardar los cambios.</span>';
+    };
+  } else {
+    current.innerHTML = '<span class="hint">Este pedido no tiene plano adjunto todavía.</span>';
+  }
+  document.getElementById('e_imagen').value = '';
+  document.getElementById('e_imagen_preview').innerHTML = '';
+
+  closeOverlay('overlayDetail');
+  document.getElementById('overlayEdit').classList.add('show');
+}
+
+document.getElementById('e_imagen').addEventListener('change', async (e)=>{
+  const file = e.target.files[0];
+  const preview = document.getElementById('e_imagen_preview');
+  if(!file){ return; }
+  preview.innerHTML = '<span class="hint">Procesando imagen...</span>';
+  try{
+    pendingEditImageData = await compressImage(file);
+    preview.innerHTML = `<img src="${pendingEditImageData}" style="max-width:100%;max-height:180px;border:1px solid var(--border);border-radius:3px;" />`;
+  }catch(err){
+    pendingEditImageData = undefined;
+    preview.innerHTML = '<span class="hint" style="color:var(--red)">No se pudo cargar la imagen.</span>';
+  }
+});
+
+async function saveEdit(){
+  const o = ORDERS.find(x=>x.id===editingOrderId);
+  if(!o) return;
+  const cliente = document.getElementById('e_cliente').value.trim();
+  const producto = document.getElementById('e_producto').value.trim();
+  if(!cliente || !producto){
+    alert('Ingresa al menos el cliente y el producto.');
+    return;
+  }
+  const backup = JSON.parse(JSON.stringify(o));
+  o.cliente = cliente;
+  o.producto = producto;
+  o.specs = document.getElementById('e_specs').value.trim();
+  o.cantidad = parseInt(document.getElementById('e_cantidad').value) || 1;
+  o.prioridad = document.getElementById('e_prioridad').value;
+  o.fechaEntrega = document.getElementById('e_fecha').value;
+  if(pendingEditImageData !== undefined){
+    o.imagen = pendingEditImageData; // null (se quitó) o base64 nuevo
+  }
+  const ok = await saveOrders();
+  if(!ok){
+    Object.assign(o, backup);
+    return;
+  }
+  pendingEditImageData = undefined;
+  closeOverlay('overlayEdit');
+  render();
+}
+
+document.getElementById('btnSaveEdit').addEventListener('click', saveEdit);
+
 function openDetail(id){
   activeOrderId = id;
   const o = ORDERS.find(x=>x.id===id);
@@ -1088,12 +1201,21 @@ function openDetail(id){
   const actionsRow2 = document.createElement('div');
   actionsRow2.style.cssText = 'display:flex;justify-content:space-between;align-items:center;width:100%;margin-top:14px;padding-top:14px;border-top:1px solid var(--border-soft);';
 
+  const leftGroup = document.createElement('div');
+  leftGroup.style.cssText = 'display:flex;gap:8px;align-items:center;';
+
+  const edit = document.createElement('button');
+  edit.className = 'btn btn-ghost btn-sm';
+  edit.textContent = '✏️ Editar pedido';
+  edit.onclick = ()=> openEditModal(o.id);
+  leftGroup.appendChild(edit);
+
   if(o.cancelled){
     const reactivate = document.createElement('button');
     reactivate.className = 'btn btn-sm';
     reactivate.textContent = '↺ Reactivar pedido';
     reactivate.onclick = ()=> reactivateOrder(o.id);
-    actionsRow2.appendChild(reactivate);
+    leftGroup.appendChild(reactivate);
   } else {
     const cancel = document.createElement('button');
     cancel.className = 'btn btn-sm';
@@ -1101,8 +1223,9 @@ function openDetail(id){
     cancel.textContent = '✕ Cancelar pedido';
     cancel.title = 'Escribe el motivo en el campo de nota antes de cancelar (opcional)';
     cancel.onclick = ()=> cancelOrder(o.id);
-    actionsRow2.appendChild(cancel);
+    leftGroup.appendChild(cancel);
   }
+  actionsRow2.appendChild(leftGroup);
 
   const del = document.createElement('span');
   del.className = 'danger-link';
