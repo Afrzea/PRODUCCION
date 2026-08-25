@@ -187,7 +187,7 @@
      propio scroll interno de altura fija, en vez de estirar toda la
      página cada vez que se entrega un pedido más. */
   .col-drop.col-scroll{
-    max-height:560px;
+    max-height:520px; /* ≈ 4 tarjetas de pedido antes de necesitar scroll */
     overflow-y:auto;
     padding-right:6px;
   }
@@ -282,6 +282,83 @@
   .activity-item:last-child{border-bottom:none;}
   .activity-item .a-time{color:var(--text-faint);font-family:var(--font-mono);font-size:10.5px;}
   .activity-item .a-desc{margin-top:2px;}
+
+  /* ---------- CUELLOS DE BOTELLA ---------- */
+  .bottleneck-section{
+    padding:16px 26px 8px;
+    border-top:1px solid var(--border-soft);
+  }
+  .bn-callout{
+    font-size:13px;
+    padding:12px 14px;
+    border-radius:4px;
+    margin:6px 0 18px;
+    background:var(--panel-alt);
+    border:1px solid var(--border-soft);
+    line-height:1.5;
+  }
+  .bn-row{display:flex;align-items:center;gap:12px;margin-bottom:12px;}
+  .bn-row.bn-empty{opacity:.55;}
+  .bn-label{width:150px;flex-shrink:0;font-family:var(--font-mono);font-size:11px;color:var(--text-dim);text-align:right;}
+  .bn-track{
+    flex:1;background:var(--panel-alt);border:1px solid var(--border-soft);
+    border-radius:2px;height:20px;position:relative;overflow:visible;
+  }
+  .bn-fill{height:100%;border-radius:2px;transition:width .3s;}
+  .bn-ok .bn-fill, .bn-fill.bn-ok{background:var(--teal);}
+  .bn-fill.bn-warn{background:var(--amber);}
+  .bn-fill.bn-bad{background:var(--red);}
+  .bn-target-marker{
+    position:absolute; top:-3px; bottom:-3px; width:2px;
+    background:var(--text); opacity:.55;
+  }
+  .bn-target-marker::after{
+    content:'obj.'; position:absolute; top:-15px; left:-11px;
+    font-family:var(--font-mono); font-size:8.5px; color:var(--text-faint);
+  }
+  .bn-nodata{
+    position:absolute; left:8px; top:50%; transform:translateY(-50%);
+    font-family:var(--font-mono); font-size:10.5px; color:var(--text-faint);
+  }
+  .bn-stats{
+    width:230px; flex-shrink:0; font-family:var(--font-mono); font-size:10.5px;
+    color:var(--text-dim); display:flex; gap:8px; align-items:baseline;
+  }
+  .bn-avg{color:var(--text); font-weight:600;}
+  .bn-freq.bad{color:var(--red);}
+  .bn-freq.warn{color:var(--amber);}
+  .bn-n{color:var(--text-faint); margin-left:auto;}
+  .bn-legend{font-size:11px; color:var(--text-faint); margin:4px 0 14px;}
+
+  .bn-top{display:flex; gap:32px; align-items:flex-start; flex-wrap:wrap; margin:10px 0 16px;}
+  .bn-summary{flex:1; min-width:260px; font-size:13px; line-height:1.65; color:var(--text-dim);}
+  .bn-summary strong{color:var(--text);}
+  .bn-summary .bn-headline{
+    font-family:var(--font-display); text-transform:uppercase; font-size:14px;
+    letter-spacing:.3px; color:var(--text); margin-bottom:6px; display:block;
+  }
+  .bn-donut-wrap{flex-shrink:0; display:flex; gap:18px; align-items:center;}
+  .bn-donut-wrap svg{display:block;}
+  .bn-donut-center-label{
+    font-family:var(--font-mono); font-size:10px; fill:var(--text-faint);
+  }
+  .bn-legend-list{display:flex; flex-direction:column; gap:8px; font-size:12px;}
+  .bn-legend-item{display:flex; align-items:center; gap:8px;}
+  .bn-legend-dot{width:10px; height:10px; border-radius:2px; flex-shrink:0;}
+  .bn-legend-text b{color:var(--text);}
+  .bn-legend-text span{color:var(--text-faint); font-family:var(--font-mono); font-size:10.5px;}
+
+  .bn-details{margin-top:6px;}
+  .bn-details summary{
+    cursor:pointer; font-family:var(--font-mono); font-size:11.5px; color:var(--text-dim);
+    padding:6px 0; user-select:none;
+  }
+  .bn-details summary:hover{color:var(--orange);}
+  @media (max-width:760px){
+    .bn-row{flex-wrap:wrap;}
+    .bn-label{width:100%; text-align:left;}
+    .bn-stats{width:100%;}
+  }
 
   @media (max-width:900px){
     .analytics-section{grid-template-columns:1fr;}
@@ -399,6 +476,19 @@
 </div>
 
 <div id="board"></div>
+
+<div class="bottleneck-section" id="bottleneckSection">
+  <h3 class="analytics-title">Cuellos de botella — dónde se atasca la producción</h3>
+  <div class="bn-top">
+    <div class="bn-summary" id="bottleneckSummary"></div>
+    <div class="bn-donut-wrap" id="bottleneckDonutWrap"></div>
+  </div>
+  <details class="bn-details">
+    <summary>Ver detalle por las 11 etapas</summary>
+    <div id="bottleneckChart" style="margin-top:14px;"></div>
+    <div class="bn-legend">Comparado contra el tiempo objetivo de cada etapa · basado en el historial completo de pedidos que ya pasaron por ahí</div>
+  </details>
+</div>
 
 <div class="analytics-section" id="analyticsSection">
   <div class="analytics-col">
@@ -1094,7 +1184,7 @@ function renderBoard(){
         <h3>${stage.label}</h3>
         <div class="count">${ordersHere.length} pedido${ordersHere.length===1?'':'s'}</div>
       </div>
-      <div class="col-drop${isEntregado ? ' col-scroll' : ''}" data-stage="${stage.id}"></div>
+      <div class="col-drop col-scroll" data-stage="${stage.id}"></div>
     `;
     const drop = col.querySelector('.col-drop');
     if(ordersHere.length===0){
@@ -1123,7 +1213,7 @@ function renderBoard(){
       <h3 style="color:var(--text-faint);">Cancelados</h3>
       <div class="count">${cancelledOrders.length} pedido${cancelledOrders.length===1?'':'s'}</div>
     </div>
-    <div class="col-drop"></div>
+    <div class="col-drop col-scroll"></div>
   `;
   const cDrop = cCol.querySelector('.col-drop');
   if(cancelledOrders.length===0){
@@ -1411,6 +1501,178 @@ async function attachNoteAndMove(id, targetStageId){
   closeOverlay('overlayDetail');
 }
 
+// Analiza el historial COMPLETO de todos los pedidos (no solo los activos
+// ahora) para calcular, por cada etapa: cuánto tarda en promedio de verdad
+// (vs. su objetivo), y en qué porcentaje de los casos ese tiempo real
+// termina superando el objetivo — eso último es lo que de verdad delata un
+// cuello de botella recurrente, más que el promedio solo.
+//
+// Las entradas de historial de etapas ya retiradas (ej. la vieja "Ensamble
+// de caja") se excluyen: su objetivo ya no existe en STAGES, así que
+// comparar contra él no tendría sentido.
+function computeBottlenecks(){
+  const stats = {};
+  STAGES.forEach(s=>{ if(s.id !== 'entregado') stats[s.id] = { totalHours:0, count:0, overCount:0 }; });
+  ORDERS.forEach(o=>{
+    (o.history || []).forEach(h=>{
+      if(!h.exitedAt || !stats[h.stage]) return;
+      const dur = (h.exitedAt - h.enteredAt) / 3600000;
+      const target = STAGES[stageIdx(h.stage)].target;
+      stats[h.stage].totalHours += dur;
+      stats[h.stage].count += 1;
+      if(target && dur > target) stats[h.stage].overCount += 1;
+    });
+  });
+  return STAGES.filter(s=>s.id !== 'entregado').map(s=>{
+    const st = stats[s.id];
+    const avgHours = st.count ? st.totalHours/st.count : 0;
+    const delayFreqPct = st.count ? Math.round((st.overCount/st.count)*100) : 0;
+    const ratio = (s.target && st.count) ? avgHours/s.target : 0;
+    return { id:s.id, label:s.label, target:s.target, avgHours, delayFreqPct, ratio, sampleCount:st.count };
+  }).sort((a,b)=>{
+    // Las etapas con datos van primero, ordenadas de la que más se atrasa
+    // a la que menos — así el problema más grande queda arriba, sin que
+    // haya que buscarlo.
+    if(a.sampleCount===0 && b.sampleCount===0) return 0;
+    if(a.sampleCount===0) return 1;
+    if(b.sampleCount===0) return -1;
+    return b.ratio - a.ratio;
+  });
+}
+
+function renderBottlenecks(){
+  const el = document.getElementById('bottleneckChart');
+  const summaryEl = document.getElementById('bottleneckSummary');
+  const donutEl = document.getElementById('bottleneckDonutWrap');
+  if(!el) return;
+  const data = computeBottlenecks();
+  const withData = data.filter(d=>d.sampleCount>0);
+
+  if(!withData.length){
+    el.innerHTML = '<div class="empty-col">Todavía no hay suficiente historial — se necesita que algún pedido complete al menos una etapa (que pase a la siguiente) para poder medir esto.</div>';
+    if(summaryEl) summaryEl.innerHTML = '<span class="bn-headline">Cuellos de botella</span>Todavía no hay historial suficiente. En cuanto algún pedido complete una etapa, aquí aparece el análisis.';
+    if(donutEl) donutEl.innerHTML = '';
+    renderBottleneckDetail(data, withData);
+    return;
+  }
+
+  // "Impacto" = horas perdidas por encima del objetivo, sumadas en TODOS los
+  // pedidos que pasaron por esa etapa (no solo el promedio). Así una etapa
+  // que se atrasa poco pero en 40 pedidos pesa más que una que se atrasa
+  // mucho pero en 1 solo caso — es la métrica correcta para "qué tanto le
+  // ha costado esto a la producción", no solo "qué tan lenta es en promedio".
+  const withImpact = withData.map(d=>({
+    ...d,
+    impactHours: Math.max(0, d.avgHours - d.target) * d.sampleCount
+  })).sort((a,b)=>b.impactHours-a.impactHours);
+
+  const totalImpact = withImpact.reduce((s,d)=>s+d.impactHours, 0);
+  const top3 = withImpact.slice(0,3).filter(d=>d.impactHours>0);
+  const restImpact = withImpact.slice(3).reduce((s,d)=>s+d.impactHours,0)
+                    + withImpact.slice(0,3).filter(d=>d.impactHours<=0).reduce((s,d)=>s+d.impactHours,0);
+
+  if(summaryEl){
+    if(totalImpact <= 0){
+      summaryEl.innerHTML = `<span class="bn-headline">Cuellos de botella</span>Se analizaron ${withData.length} de ${data.length} etapas con historial. Ninguna está tardando más de su objetivo en promedio — la producción va al ritmo esperado por ahora.`;
+    } else {
+      const names = top3.map(d=>`<strong>${d.label}</strong>`).join(', ');
+      const topPct = Math.round(((top3.reduce((s,d)=>s+d.impactHours,0))/totalImpact)*100);
+      summaryEl.innerHTML = `<span class="bn-headline">Cuellos de botella</span>`
+        + `Se analizaron ${withData.length} de ${data.length} etapas con historial, con un total de <strong>${fmtHours(totalImpact)}</strong> perdidas por encima de los objetivos. `
+        + `El ${topPct}% de ese tiempo se concentra en 3 etapas: ${names}. `
+        + `Ahí es donde más rinde enfocar cualquier mejora de proceso.`;
+    }
+  }
+
+  if(donutEl){
+    if(totalImpact <= 0){
+      donutEl.innerHTML = '';
+    } else {
+      const colors = ['var(--red)', 'var(--amber)', 'var(--orange)'];
+      const slices = top3.map((d,i)=>({ value:d.impactHours, color:colors[i], label:d.label, hours:d.impactHours }));
+      if(restImpact > 0.05){
+        slices.push({ value:restImpact, color:'var(--border)', label:'Otras etapas', hours:restImpact });
+      }
+      donutEl.innerHTML = renderDonutChart(slices, totalImpact);
+    }
+  }
+
+  renderBottleneckDetail(data, withData);
+}
+
+// Dibuja una torta/dona en SVG puro (sin librerías) usando stroke-dasharray
+// por segmento — mismo enfoque que el resto de la herramienta: sin
+// dependencias externas, todo en un solo archivo.
+function renderDonutChart(slices, total){
+  const size = 140, stroke = 26, r = (size-stroke)/2, c = size/2;
+  const circumference = 2*Math.PI*r;
+  let acc = 0;
+  const circles = slices.map(sl=>{
+    const frac = sl.value/total;
+    const dash = Math.max(0, frac*circumference - 1.5); // -1.5 deja un pequeño espacio entre segmentos
+    const gap = circumference - dash;
+    const el = `<circle cx="${c}" cy="${c}" r="${r}" fill="none" stroke="${sl.color}" stroke-width="${stroke}" stroke-dasharray="${dash} ${gap}" stroke-dashoffset="${-acc}" transform="rotate(-90 ${c} ${c})" />`;
+    acc += frac*circumference;
+    return el;
+  }).join('');
+  const legend = slices.map(sl=>{
+    const pct = Math.round((sl.value/total)*100);
+    return `
+      <div class="bn-legend-item">
+        <div class="bn-legend-dot" style="background:${sl.color};"></div>
+        <div class="bn-legend-text"><b>${sl.label}</b><br/><span>${fmtHours(sl.hours)} · ${pct}%</span></div>
+      </div>`;
+  }).join('');
+  return `
+    <svg viewBox="0 0 ${size} ${size}" width="${size}" height="${size}">
+      <circle cx="${c}" cy="${c}" r="${r}" fill="none" stroke="var(--panel-alt)" stroke-width="${stroke}" />
+      ${circles}
+    </svg>
+    <div class="bn-legend-list">${legend}</div>
+  `;
+}
+
+// El detalle por etapa (las barras comparativas) queda dentro del <details>
+// colapsable para quien quiera profundizar más allá del resumen y la torta.
+function renderBottleneckDetail(data, withData){
+  const el = document.getElementById('bottleneckChart');
+  if(!el) return;
+  if(!withData.length){
+    el.innerHTML = '<div class="empty-col">Todavía no hay suficiente historial.</div>';
+    return;
+  }
+  const maxScale = Math.max(...withData.map(d=>Math.max(d.avgHours, d.target))) * 1.12;
+
+  el.innerHTML = data.map(d=>{
+    if(d.sampleCount === 0){
+      return `
+        <div class="bn-row bn-empty">
+          <div class="bn-label">${d.label}</div>
+          <div class="bn-track"><span class="bn-nodata">Sin historial todavía</span></div>
+          <div class="bn-stats"></div>
+        </div>`;
+    }
+    const realPct = Math.min(100, (d.avgHours/maxScale)*100);
+    const targetPct = Math.min(100, (d.target/maxScale)*100);
+    const level = d.ratio >= 1 ? 'bad' : (d.ratio >= 0.7 ? 'warn' : 'ok');
+    const freqClass = d.delayFreqPct >= 50 ? 'bad' : (d.delayFreqPct >= 25 ? 'warn' : '');
+    return `
+      <div class="bn-row">
+        <div class="bn-label">${d.label}</div>
+        <div class="bn-track">
+          <div class="bn-fill bn-${level}" style="width:${realPct}%;"></div>
+          <div class="bn-target-marker" style="left:${targetPct}%;" title="Objetivo: ${fmtHours(d.target)}"></div>
+        </div>
+        <div class="bn-stats">
+          <span class="bn-avg">${fmtHours(d.avgHours)}</span>
+          <span>/ obj. ${fmtHours(d.target)}</span>
+          <span class="bn-freq ${freqClass}">${d.delayFreqPct}% se retrasa</span>
+          <span class="bn-n">n=${d.sampleCount}</span>
+        </div>
+      </div>`;
+  }).join('');
+}
+
 function renderStageChart(){
   const el = document.getElementById('stageChart');
   if(!el) return;
@@ -1467,6 +1729,7 @@ function render(){
   checkForNewlyDelayed();
   renderKPIs();
   renderBoard();
+  renderBottlenecks();
   renderStageChart();
   renderActivityFeed();
 }
