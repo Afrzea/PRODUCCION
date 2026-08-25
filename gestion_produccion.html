@@ -183,6 +183,14 @@
     padding-top:4px;
   }
   .col-drop.dragover{background:rgba(255,106,31,0.06);outline:1px dashed var(--orange);}
+  /* La columna de Entregado no crece sin límite hacia abajo: tiene su
+     propio scroll interno de altura fija, en vez de estirar toda la
+     página cada vez que se entrega un pedido más. */
+  .col-drop.col-scroll{
+    max-height:560px;
+    overflow-y:auto;
+    padding-right:6px;
+  }
 
   /* ---------- ORDER CARD (traveler tag) ---------- */
   .card{
@@ -491,8 +499,7 @@ const STAGES = [
   {id:'ventas',   label:'Pedido registrado', target:2},
   {id:'diseno',   label:'Diseño y despiece', target:8},
   {id:'corte',    label:'Corte y doblez', target:8},
-  {id:'ensCaja',  label:'Ensamble de caja', target:6},
-  {id:'ensGral',  label:'Ensamble general', target:8},
+  {id:'ensGral',  label:'Ensamble general', target:14},
   {id:'llenado',  label:'Llenado', target:6},
   {id:'pintura',  label:'Pintura', target:10},
   {id:'armado',   label:'Armado final', target:8},
@@ -611,6 +618,24 @@ function showDebugPanel(label, status, text){
 }
 
 function stageIdx(id){ return STAGES.findIndex(s=>s.id===id); }
+
+// El 25/08 se eliminó la etapa "Ensamble de caja" (se fusionó con "Ensamble
+// general"). Los pedidos que ya estaban ahí guardados en la Hoja de Google
+// no desaparecen ni quedan huérfanos: esta función los reubica en Ensamble
+// general automáticamente, cada vez que se cargan los datos. Conserva la
+// hora en que entraron a la etapa (enteredAt), para no reiniciarles el
+// cronómetro de tiempo por etapa de la nada.
+function migrateRemovedStages(orders){
+  (orders || []).forEach(o=>{
+    if(o.currentStage === 'ensCaja'){
+      o.currentStage = 'ensGral';
+      if(o.history && o.history.length){
+        o.history[o.history.length-1].stage = 'ensGral';
+      }
+    }
+  });
+  return orders;
+}
 function now(){ return Date.now(); }
 function fmtDate(ts){
   if(!ts) return '—';
@@ -670,6 +695,7 @@ async function loadOrders(){
     try{
       const res = await window.storage.get(STORAGE_KEY, true);
       ORDERS = res && res.value ? JSON.parse(res.value) : [];
+      migrateRemovedStages(ORDERS);
       STORAGE_MODE = 'persistent';
       setFooterNote('Torre de Control de Producción · guardado compartido activo dentro de Claude.');
       render();
@@ -708,6 +734,7 @@ async function attemptLogin(){
     if(Array.isArray(parsed)){
       ACCESS_TOKEN = pass;
       ORDERS = parsed;
+      migrateRemovedStages(ORDERS);
       STORAGE_MODE = 'backend';
       syncKnownIds();
       seedOrderStatuses();
@@ -882,6 +909,7 @@ async function pollForUpdates(){
     if(isSaving || Date.now() < suppressPollUntil) return; // volvió a guardar mientras esperábamos la respuesta
     const newOnes = parsed.filter(o => !knownOrderIds.has(o.id));
     ORDERS = parsed;
+    migrateRemovedStages(ORDERS);
     syncKnownIds();
     if(newOnes.length){
       notifyNewOrders(newOnes);
@@ -1006,20 +1034,33 @@ function matchesFilters(o){
   return (o.cliente+' '+o.producto+' '+o.code).toLowerCase().includes(q);
 }
 
+// Momento en que un pedido entró a "Entregado" (el último registro de su
+// historial). Se usa para mostrar los más recientes primero en esa columna.
+function deliveredAt(o){
+  const hist = o.history && o.history.length ? o.history[o.history.length-1] : null;
+  return hist ? hist.enteredAt : 0;
+}
+
 function renderBoard(){
   const board = document.getElementById('board');
   board.innerHTML = '';
   STAGES.forEach((stage, idx) => {
     const col = document.createElement('div');
     col.className = 'col';
-    const ordersHere = ORDERS.filter(o=>o.currentStage===stage.id && !o.cancelled && matchesFilters(o));
+    let ordersHere = ORDERS.filter(o=>o.currentStage===stage.id && !o.cancelled && matchesFilters(o));
+    const isEntregado = stage.id === 'entregado';
+    if(isEntregado){
+      // Más recientes arriba: si no, el pedido entregado hoy queda enterrado
+      // debajo de meses de entregas viejas y toca hacer scroll para verlo.
+      ordersHere = ordersHere.slice().sort((a,b) => deliveredAt(b) - deliveredAt(a));
+    }
     col.innerHTML = `
       <div class="col-head">
         <div class="num">${String(idx+1).padStart(2,'0')}</div>
         <h3>${stage.label}</h3>
         <div class="count">${ordersHere.length} pedido${ordersHere.length===1?'':'s'}</div>
       </div>
-      <div class="col-drop" data-stage="${stage.id}"></div>
+      <div class="col-drop${isEntregado ? ' col-scroll' : ''}" data-stage="${stage.id}"></div>
     `;
     const drop = col.querySelector('.col-drop');
     if(ordersHere.length===0){
