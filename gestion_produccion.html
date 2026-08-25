@@ -619,6 +619,24 @@ function showDebugPanel(label, status, text){
 
 function stageIdx(id){ return STAGES.findIndex(s=>s.id===id); }
 
+// Etapas que existieron antes pero ya se quitaron del flujo activo. Se
+// guardan aquí solo para poder mostrar el historial viejo con su nombre
+// correcto — el pedido no puede estar "actualmente" en una de estas etapas,
+// pero si algún día pasó por ella, esa fila del historial no debe romperse
+// ni desaparecer.
+const RETIRED_STAGE_LABELS = { ensCaja: 'Ensamble de caja (etapa retirada)' };
+
+// Devuelve la etiqueta de una etapa por su id, sea una etapa activa o una ya
+// retirada. Usar SIEMPRE esto en vez de STAGES[stageIdx(id)].label al leer
+// h.stage de un historial — STAGES[stageIdx(id)] puede ser undefined si la
+// etapa ya no existe, y eso rompe en silencio toda la pantalla que lo use
+// (así se rompió antes el feed de Actividad reciente).
+function stageLabelFor(id){
+  const idx = stageIdx(id);
+  if(idx !== -1) return STAGES[idx].label;
+  return RETIRED_STAGE_LABELS[id] || id;
+}
+
 // El 25/08 se eliminó la etapa "Ensamble de caja" (se fusionó con "Ensamble
 // general"). Los pedidos que ya estaban ahí guardados en la Hoja de Google
 // no desaparecen ni quedan huérfanos: esta función los reubica en Ensamble
@@ -696,6 +714,7 @@ async function loadOrders(){
       const res = await window.storage.get(STORAGE_KEY, true);
       ORDERS = res && res.value ? JSON.parse(res.value) : [];
       migrateRemovedStages(ORDERS);
+      seedAlertedDelays();
       STORAGE_MODE = 'persistent';
       setFooterNote('Torre de Control de Producción · guardado compartido activo dentro de Claude.');
       render();
@@ -737,7 +756,7 @@ async function attemptLogin(){
       migrateRemovedStages(ORDERS);
       STORAGE_MODE = 'backend';
       syncKnownIds();
-      seedOrderStatuses();
+      seedAlertedDelays();
       if('Notification' in window && Notification.permission === 'default'){
         Notification.requestPermission();
       }
@@ -812,41 +831,56 @@ async function saveOrders(){
 let knownOrderIds = new Set();
 function syncKnownIds(){ knownOrderIds = new Set(ORDERS.map(o=>o.id)); }
 
-// Guarda el último estado (ok/warn/bad) visto de cada pedido activo, para
-// poder detectar el momento exacto en que uno CRUZA a "retrasado" y avisar
-// solo entonces — no en cada render, y no repetidamente mientras siga atrasado.
-let knownOrderStatus = new Map();
+// Registra qué avisos de retraso ya se dispararon, para no repetir el mismo
+// aviso cada 60s mientras el pedido siga en la misma etapa y el mismo
+// motivo de retraso. La llave incluye la etapa actual, así que si el pedido
+// avanza (o retrocede) y se vuelve a atrasar ahí, sí vuelve a avisar.
+let alertedDelayKeys = new Set();
 
-// Se llama justo después de iniciar sesión o cargar pedidos por primera vez:
-// registra el estado actual de todos los pedidos SIN avisar, para no
-// disparar una alerta de golpe por cada pedido que ya estaba atrasado antes
-// de abrir la página.
-function seedOrderStatuses(){
-  knownOrderStatus.clear();
+function delayAlertKey(o, status){
+  return o.id + ':' + o.currentStage + ':' + status.text;
+}
+
+// Se llama justo después de iniciar sesión o cargar pedidos: marca como "ya
+// avisados" todos los retrasos que existan en ese momento, para no disparar
+// una alerta de golpe por cada pedido que ya estaba atrasado antes de abrir
+// la página. Solo se avisa de los retrasos que ocurran de ahí en adelante.
+function seedAlertedDelays(){
+  alertedDelayKeys.clear();
   ORDERS.forEach(o=>{
     if(o.cancelled || o.currentStage === 'entregado') return;
-    knownOrderStatus.set(o.id, statusForOrder(o).level);
+    const status = statusForOrder(o);
+    if(status.level === 'bad') alertedDelayKeys.add(delayAlertKey(o, status));
   });
 }
 
 function checkForNewlyDelayed(){
   ORDERS.forEach(o=>{
-    if(o.cancelled || o.currentStage === 'entregado'){
-      knownOrderStatus.delete(o.id);
-      return;
-    }
+    if(o.cancelled || o.currentStage === 'entregado') return;
     const status = statusForOrder(o);
-    const prev = knownOrderStatus.get(o.id);
-    if(prev !== undefined && prev !== 'bad' && status.level === 'bad'){
-      showToast('⏰ ' + o.code + ' — ' + status.text + ' (' + o.cliente + ')');
-      playBeep();
-      if('Notification' in window && Notification.permission === 'granted'){
-        try{
-          new Notification('Pedido retrasado', { body: o.code + ' — ' + status.text + ' · ' + o.cliente });
-        }catch(e){}
-      }
+    if(status.level !== 'bad') return;
+    const isEntregaVencida = status.text === 'Entrega vencida';
+    if(!isEntregaVencida){
+      const hist = o.history[o.history.length-1];
+      const hoursIn = (now() - hist.enteredAt)/3600000;
+      // "Retrasado en etapa" solo avisa tras 24h como mínimo en la etapa,
+      // aunque el objetivo propio de esa etapa sea más corto (ej. "Pedido
+      // registrado" tiene objetivo de 2h — sin este mínimo, avisaría casi
+      // de inmediato y sería puro ruido). "Entrega vencida" sí avisa de
+      // una vez: ahí lo que importa es la fecha comprometida con el
+      // cliente, no cuánto lleva el pedido en la etapa actual.
+      if(hoursIn < 24) return;
     }
-    knownOrderStatus.set(o.id, status.level);
+    const key = delayAlertKey(o, status);
+    if(alertedDelayKeys.has(key)) return;
+    alertedDelayKeys.add(key);
+    showToast('⏰ ' + o.code + ' — ' + status.text + ' (' + o.cliente + ')');
+    playBeep();
+    if('Notification' in window && Notification.permission === 'granted'){
+      try{
+        new Notification('Pedido retrasado', { body: o.code + ' — ' + status.text + ' · ' + o.cliente });
+      }catch(e){}
+    }
   });
 }
 
@@ -1291,7 +1325,7 @@ function openDetail(id){
   const tl = document.getElementById('d_timeline');
   tl.innerHTML = '';
   o.history.forEach((h,i)=>{
-    const stageLabel = STAGES[stageIdx(h.stage)].label;
+    const stageLabel = stageLabelFor(h.stage);
     const isActive = i === o.history.length-1 && o.currentStage!=='entregado';
     const dur = h.exitedAt ? (h.exitedAt-h.enteredAt)/3600000 : (now()-h.enteredAt)/3600000;
     const div = document.createElement('div');
@@ -1405,7 +1439,7 @@ function renderActivityFeed(){
         ts: h.enteredAt,
         text: (i===0)
           ? `${o.code} — pedido registrado (${escapeHtml(o.cliente)})`
-          : `${o.code} → ${STAGES[stageIdx(h.stage)].label}${h.enteredBy? ' · '+escapeHtml(h.enteredBy):''}`
+          : `${o.code} → ${stageLabelFor(h.stage)}${h.enteredBy? ' · '+escapeHtml(h.enteredBy):''}`
       });
     });
     if(o.cancelled && o.cancelledAt){
