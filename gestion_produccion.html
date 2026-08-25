@@ -531,19 +531,62 @@ function setFooterNote(text){
 // fetch() convierte automáticamente un POST en GET cuando Google redirige
 // la petición internamente, lo que hace que el guardado se pierda sin
 // mostrar ningún error. XMLHttpRequest no tiene ese problema.
-function xhrRequest(method, url, body){
+//
+// Además ponemos un timeout explícito: sin esto, una petición que se queda
+// colgada (wifi inestable, Apps Script lento en despertar) nunca falla ni
+// avisa — el botón se queda en "Verificando..." o el sondeo se congela en
+// silencio, y parece que la herramienta se trabó.
+const XHR_TIMEOUT_MS = 15000;
+
+function xhrRequest(method, url, body, timeoutMs){
   return new Promise((resolve, reject)=>{
     const xhr = new XMLHttpRequest();
     xhr.open(method, url, true);
+    xhr.timeout = timeoutMs || XHR_TIMEOUT_MS;
     if(method === 'POST'){
       xhr.setRequestHeader('Content-Type', 'text/plain;charset=utf-8');
     }
     xhr.onload = ()=>{
       resolve({ status: xhr.status, text: xhr.responseText, ok: xhr.status >= 200 && xhr.status < 300 });
     };
-    xhr.onerror = ()=> reject(new Error('Error de red al contactar el backend'));
+    xhr.onerror = ()=>{
+      const err = new Error('Error de red al contactar el backend');
+      err.kind = 'network';
+      reject(err);
+    };
+    xhr.ontimeout = ()=>{
+      const err = new Error('El backend tardó demasiado en responder');
+      err.kind = 'timeout';
+      reject(err);
+    };
     xhr.send(body || null);
   });
+}
+
+// Helper genérico: reintenta una petición varias veces con espera creciente
+// entre intentos, antes de darse por vencido. Antes esta lógica solo existía
+// duplicada dentro de saveOrders(); ahora la usan también el login y el
+// sondeo, que antes fallaban a la primera sin reintentar.
+async function xhrRequestWithRetry(method, url, body, opts){
+  const retries = (opts && opts.retries) || 3;
+  const baseDelay = (opts && opts.baseDelayMs) || 1200;
+  let lastErr = null;
+  for(let intento = 1; intento <= retries; intento++){
+    try{
+      return await xhrRequest(method, url, body);
+    }catch(e){
+      lastErr = e;
+      console.error('Intento ' + intento + ' fallido (' + (e.kind || 'error') + ')', e);
+      if(intento < retries) await new Promise(r => setTimeout(r, baseDelay * intento));
+    }
+  }
+  throw lastErr;
+}
+
+function connectionErrorMessage(e){
+  if(e && e.kind === 'timeout') return 'El servidor está tardando demasiado en responder. Intenta de nuevo en unos segundos.';
+  if(e && e.kind === 'network') return 'No se pudo conectar. Revisa tu conexión a internet.';
+  return 'Ocurrió un problema inesperado. Intenta de nuevo.';
 }
 
 function showDebugPanel(label, status, text){
@@ -660,7 +703,7 @@ async function attemptLogin(){
   btn.disabled = true; btn.textContent = 'Verificando...';
 
   try{
-    const res = await xhrRequest('GET', tokenUrl(BACKEND_URL, pass));
+    const res = await xhrRequestWithRetry('POST', BACKEND_URL, JSON.stringify({ token: pass, action: 'read' }), { retries: 3, baseDelayMs: 1000 });
     const parsed = JSON.parse(res.text);
     if(Array.isArray(parsed)){
       ACCESS_TOKEN = pass;
@@ -682,7 +725,7 @@ async function attemptLogin(){
       errEl.style.display = 'block';
     }
   }catch(e){
-    errEl.textContent = 'No se pudo conectar. Revisa tu conexión a internet.';
+    errEl.textContent = connectionErrorMessage(e);
     errEl.style.display = 'block';
   }
   btn.disabled = false; btn.textContent = 'Entrar';
@@ -695,22 +738,9 @@ async function saveOrders(){
   if(STORAGE_MODE === 'backend'){
     isSaving = true;
     try{
-      let res = null;
-      let lastErr = null;
-      // Reintentamos hasta 3 veces si hay un corte de red momentáneo (ej. ERR_NAME_NOT_RESOLVED),
-      // antes de darnos por vencidos y avisarle al usuario.
-      for(let intento = 1; intento <= 3; intento++){
-        try{
-          res = await xhrRequest('POST', BACKEND_URL, JSON.stringify({ token: ACCESS_TOKEN, orders: ORDERS }));
-          lastErr = null;
-          break;
-        }catch(e){
-          lastErr = e;
-          console.error('Intento ' + intento + ' fallido guardando en backend', e);
-          if(intento < 3) await new Promise(r => setTimeout(r, 1200));
-        }
-      }
-      if(lastErr){ throw lastErr; }
+      // Reintentamos hasta 3 veces si hay un corte de red momentáneo (ej. ERR_NAME_NOT_RESOLVED)
+      // o el backend tarda en responder, antes de darnos por vencidos y avisarle al usuario.
+      const res = await xhrRequestWithRetry('POST', BACKEND_URL, JSON.stringify({ token: ACCESS_TOKEN, action: 'save', orders: ORDERS }), { retries: 3, baseDelayMs: 1200 });
       const parsed = res.text ? JSON.parse(res.text) : null;
       if(!res.ok || !parsed || parsed.ok !== true){
         if(parsed && parsed.error === 'unauthorized'){
@@ -728,7 +758,7 @@ async function saveOrders(){
       return true;
     }catch(e){
       console.error('Error guardando en backend', e);
-      alert('No se pudo guardar en tu Hoja de Google. Revisa tu conexión a internet e intenta de nuevo.');
+      alert(connectionErrorMessage(e) + '\n\nTu pedido NO se guardó todavía — vuelve a intentarlo antes de cerrar la página.');
       return false;
     }finally{
       isSaving = false;
@@ -798,11 +828,16 @@ function notifyNewOrders(newOnes){
   }
 }
 
+let pollFailCount = 0;
+let connectionLostNotified = false;
+
 async function pollForUpdates(){
   if(STORAGE_MODE !== 'backend') return;
   if(isSaving || Date.now() < suppressPollUntil) return;
   try{
-    const res = await xhrRequest('GET', tokenUrl(BACKEND_URL, ACCESS_TOKEN));
+    // Solo 2 intentos aquí (no 3): el sondeo corre cada 45s de por sí,
+    // así que no vale la pena hacer esperar tanto a un ciclo en segundo plano.
+    const res = await xhrRequestWithRetry('POST', BACKEND_URL, JSON.stringify({ token: ACCESS_TOKEN, action: 'read' }), { retries: 2, baseDelayMs: 1000 });
     const parsed = JSON.parse(res.text);
     if(!Array.isArray(parsed)) return;
     if(isSaving || Date.now() < suppressPollUntil) return; // volvió a guardar mientras esperábamos la respuesta
@@ -813,8 +848,21 @@ async function pollForUpdates(){
       notifyNewOrders(newOnes);
     }
     render();
+    if(pollFailCount >= 3 && connectionLostNotified){
+      showToast('✅ Conexión recuperada. El tablero vuelve a estar al día.');
+      connectionLostNotified = false;
+    }
+    pollFailCount = 0;
   }catch(e){
-    console.error('Error revisando si hay pedidos nuevos', e);
+    pollFailCount++;
+    console.error('Error revisando si hay pedidos nuevos (fallo ' + pollFailCount + ')', e);
+    // Avisamos solo después de 3 fallos seguidos (~2-3 min), no en el primer tropiezo,
+    // para no alarmar por un corte de wifi de un segundo. Y avisamos una sola vez,
+    // no en cada ciclo de sondeo mientras siga caído.
+    if(pollFailCount >= 3 && !connectionLostNotified){
+      showToast('⚠️ Sin conexión con el servidor. Lo que veas puede no estar actualizado.');
+      connectionLostNotified = true;
+    }
   }
 }
 
