@@ -710,6 +710,7 @@ async function attemptLogin(){
       ORDERS = parsed;
       STORAGE_MODE = 'backend';
       syncKnownIds();
+      seedOrderStatuses();
       if('Notification' in window && Notification.permission === 'default'){
         Notification.requestPermission();
       }
@@ -783,6 +784,44 @@ async function saveOrders(){
 
 let knownOrderIds = new Set();
 function syncKnownIds(){ knownOrderIds = new Set(ORDERS.map(o=>o.id)); }
+
+// Guarda el último estado (ok/warn/bad) visto de cada pedido activo, para
+// poder detectar el momento exacto en que uno CRUZA a "retrasado" y avisar
+// solo entonces — no en cada render, y no repetidamente mientras siga atrasado.
+let knownOrderStatus = new Map();
+
+// Se llama justo después de iniciar sesión o cargar pedidos por primera vez:
+// registra el estado actual de todos los pedidos SIN avisar, para no
+// disparar una alerta de golpe por cada pedido que ya estaba atrasado antes
+// de abrir la página.
+function seedOrderStatuses(){
+  knownOrderStatus.clear();
+  ORDERS.forEach(o=>{
+    if(o.cancelled || o.currentStage === 'entregado') return;
+    knownOrderStatus.set(o.id, statusForOrder(o).level);
+  });
+}
+
+function checkForNewlyDelayed(){
+  ORDERS.forEach(o=>{
+    if(o.cancelled || o.currentStage === 'entregado'){
+      knownOrderStatus.delete(o.id);
+      return;
+    }
+    const status = statusForOrder(o);
+    const prev = knownOrderStatus.get(o.id);
+    if(prev !== undefined && prev !== 'bad' && status.level === 'bad'){
+      showToast('⏰ ' + o.code + ' — ' + status.text + ' (' + o.cliente + ')');
+      playBeep();
+      if('Notification' in window && Notification.permission === 'granted'){
+        try{
+          new Notification('Pedido retrasado', { body: o.code + ' — ' + status.text + ' · ' + o.cliente });
+        }catch(e){}
+      }
+    }
+    knownOrderStatus.set(o.id, status.level);
+  });
+}
 
 function playBeep(){
   try{
@@ -1350,6 +1389,7 @@ function renderActivityFeed(){
 }
 
 function render(){
+  checkForNewlyDelayed();
   renderKPIs();
   renderBoard();
   renderStageChart();
