@@ -196,18 +196,25 @@
   .card{
     background:var(--panel);
     border:1px solid var(--border);
+    border-left:4px solid var(--border);
     border-radius:3px;
     margin-bottom:12px;
-    padding:12px 12px 10px;
+    padding:12px 12px 10px 11px;
     cursor:grab;
     position:relative;
     transition:.12s;
     box-shadow:0 1px 3px rgba(24,29,36,0.06);
   }
-  .card:hover{border-color:var(--text-dim);transform:translateY(-1px);}
+  .card:hover{border-color:var(--text-dim);border-left-color:inherit;transform:translateY(-1px);}
   .card:active{cursor:grabbing;}
   .card.cancelled{opacity:0.55;}
   .card.cancelled .prod{text-decoration:line-through;}
+  /* El borde lateral es la primera señal visual del estado del pedido —
+     se ve desde lejos, sin tener que leer la etiqueta de texto. */
+  .card.st-ok{border-left-color:var(--teal);}
+  .card.st-warn{border-left-color:var(--amber);}
+  .card.st-bad{border-left-color:var(--red);}
+  .card.st-cancel{border-left-color:var(--border);}
   .danger-link{
     color:var(--red);
     font-size:11.5px;
@@ -225,9 +232,24 @@
     border-radius:50%;
     box-shadow:inset 0 1px 2px rgba(0,0,0,.12);
   }
-  .card .code{font-family:var(--font-mono);font-size:11px;color:var(--text-faint);}
-  .card .prod{font-family:var(--font-display);font-size:14.5px;margin:3px 0 2px;font-weight:500;line-height:1.25;}
+  .card .card-top{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;}
+  .card .code{font-family:var(--font-mono);font-size:9.5px;color:var(--text-faint);}
+  /* El producto ahora es el elemento más grande y con más peso de la
+     tarjeta — antes competía casi al mismo nivel que el código de pedido,
+     que en la práctica es lo menos útil de leer de un vistazo. */
+  .card .prod{font-family:var(--font-display);font-size:16px;margin:2px 0 2px;font-weight:600;line-height:1.22;}
   .card .cli{font-size:12px;color:var(--text-dim);margin-bottom:8px;}
+  .card .days-badge{
+    flex-shrink:0; font-family:var(--font-mono); font-size:9.5px;
+    padding:2px 6px; border-radius:10px; white-space:nowrap;
+    background:var(--panel-alt); color:var(--text-faint); border:1px solid var(--border-soft);
+  }
+  .card .days-badge.st-warn{color:var(--amber); border-color:rgba(244,180,0,.4); background:rgba(244,180,0,.08);}
+  .card .days-badge.st-bad{color:var(--red); border-color:rgba(239,69,82,.4); background:rgba(239,69,82,.08);}
+  .card .plano-thumb{
+    width:100%; height:64px; object-fit:cover; border-radius:3px;
+    border:1px solid var(--border-soft); margin-bottom:8px; display:block;
+  }
   .card .row{display:flex;justify-content:space-between;align-items:center;font-size:11px;margin-top:6px;}
   .tag{
     font-family:var(--font-mono);
@@ -1227,14 +1249,35 @@ function renderBoard(){
 
 function renderCard(o){
   const div = document.createElement('div');
-  div.className = 'card' + (o.cancelled ? ' cancelled' : '');
+  const st = statusForOrder(o);
+  div.className = 'card st-' + st.level + (o.cancelled ? ' cancelled' : '');
   div.draggable = !o.cancelled;
   div.addEventListener('dragstart', e=> e.dataTransfer.setData('text/plain', o.id));
   div.addEventListener('click', ()=> openDetail(o.id));
-  const st = statusForOrder(o);
+
+  // Insignia de "cuánto lleva en esta etapa" visible sin abrir el detalle.
+  // Se colorea igual que el estado del pedido (ámbar si está por vencer,
+  // rojo si ya está retrasado), para que la urgencia se note de un vistazo.
+  let daysBadgeHtml = '';
+  if(!o.cancelled && o.currentStage !== 'entregado'){
+    const hist = o.history[o.history.length-1];
+    const hoursIn = (now() - hist.enteredAt)/3600000;
+    const label = hoursIn < 24 ? Math.round(hoursIn)+'h en etapa' : Math.round(hoursIn/24)+'d en etapa';
+    const badgeLevel = st.level === 'ok' ? '' : ' st-'+st.level;
+    daysBadgeHtml = `<span class="days-badge${badgeLevel}">${label}</span>`;
+  }
+
+  // Miniatura del plano si el pedido tiene uno adjunto, en vez de solo el
+  // clip 📎 — se ve de inmediato si hay algo que revisar, sin dar clic.
+  const thumbHtml = o.imagen ? `<img class="plano-thumb" src="${driveImgUrl(o.imagen)}" alt="Plano adjunto" loading="lazy" />` : '';
+
   div.innerHTML = `
     <div class="hole"></div>
-    <div class="code">${o.code} ${o.imagen ? '📎' : ''}</div>
+    <div class="card-top">
+      <div class="code">${o.code}${o.imagen ? ' 📎' : ''}</div>
+      ${daysBadgeHtml}
+    </div>
+    ${thumbHtml}
     <div class="prod">${escapeHtml(o.producto)}</div>
     <div class="cli">${escapeHtml(o.cliente)} · x${o.cantidad}</div>
     <div class="row">
