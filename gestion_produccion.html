@@ -445,6 +445,32 @@
     header{padding:14px 16px;}
     .toolbar,#board{padding-left:16px;padding-right:16px;}
   }
+
+  /* ---------- VISTA MÓVIL: una etapa a la vez ---------- */
+  .mobile-stage-tabs{
+    display:none; /* oculto en escritorio */
+    gap:6px; overflow-x:auto; padding:4px 16px 10px;
+    -webkit-overflow-scrolling:touch;
+  }
+  .mobile-stage-tab{
+    flex-shrink:0; font-family:var(--font-mono); font-size:11.5px;
+    padding:7px 12px; border-radius:14px; border:1px solid var(--border);
+    background:var(--panel); color:var(--text-dim); cursor:pointer; white-space:nowrap;
+  }
+  .mobile-stage-tab.active{
+    background:var(--orange); border-color:var(--orange); color:#fff; font-weight:600;
+  }
+  .mobile-stage-tab .tab-count{opacity:.75; margin-left:3px;}
+  @media (max-width:760px){
+    .mobile-stage-tabs{display:flex;}
+    /* En escritorio el tablero se desplaza horizontalmente para ver las 12
+       columnas; en móvil eso es incómodo. En su lugar mostramos solo la
+       columna activa a ancho completo, y se navega con las pestañas de
+       arriba en vez de deslizar de lado a lado. */
+    #board{overflow-x:hidden;}
+    .col{display:none; min-width:100%; max-width:100%; border-right:none;}
+    .col.mobile-active{display:flex;}
+  }
 </style>
 </head>
 <body>
@@ -496,6 +522,8 @@
   <div class="spacer"></div>
   <span class="hint">Datos compartidos — visibles para todas las áreas que abran esta herramienta</span>
 </div>
+
+<div class="mobile-stage-tabs" id="mobileStageTabs"></div>
 
 <div id="board"></div>
 
@@ -731,6 +759,28 @@ function showDebugPanel(label, status, text){
 }
 
 function stageIdx(id){ return STAGES.findIndex(s=>s.id===id); }
+
+// Qué etapa se muestra a pantalla completa en la vista móvil (una a la vez,
+// en vez de las 12 columnas en fila). Empieza en la primera etapa activa.
+let mobileActiveStage = STAGES[0].id;
+
+function renderMobileStageTabs(tabStats){
+  const el = document.getElementById('mobileStageTabs');
+  if(!el) return;
+  el.innerHTML = tabStats.map(s => `
+    <div class="mobile-stage-tab${s.id===mobileActiveStage?' active':''}" data-stage="${s.id}">
+      ${s.label}<span class="tab-count">${s.count}</span>
+    </div>
+  `).join('');
+  el.querySelectorAll('.mobile-stage-tab').forEach(tab=>{
+    tab.addEventListener('click', ()=>{
+      mobileActiveStage = tab.dataset.stage;
+      renderBoard();
+      // Al cambiar de pestaña, sube el scroll al inicio de la columna nueva.
+      window.scrollTo({top: document.getElementById('board').offsetTop - 90, behavior:'smooth'});
+    });
+  });
+}
 
 // Etapas que existieron antes pero ya se quitaron del flujo activo. Se
 // guardan aquí solo para poder mostrar el historial viejo con su nombre
@@ -1191,9 +1241,10 @@ function deliveredAt(o){
 function renderBoard(){
   const board = document.getElementById('board');
   board.innerHTML = '';
+  const tabStats = []; // {id, label, count} — para dibujar las pestañas de móvil
   STAGES.forEach((stage, idx) => {
     const col = document.createElement('div');
-    col.className = 'col';
+    col.className = 'col' + (stage.id === mobileActiveStage ? ' mobile-active' : '');
     let ordersHere = ORDERS.filter(o=>o.currentStage===stage.id && !o.cancelled && matchesFilters(o));
     const isEntregado = stage.id === 'entregado';
     if(isEntregado){
@@ -1201,6 +1252,7 @@ function renderBoard(){
       // debajo de meses de entregas viejas y toca hacer scroll para verlo.
       ordersHere = ordersHere.slice().sort((a,b) => deliveredAt(b) - deliveredAt(a));
     }
+    tabStats.push({ id: stage.id, label: stage.label, count: ordersHere.length });
     col.innerHTML = `
       <div class="col-head">
         <div class="num">${String(idx+1).padStart(2,'0')}</div>
@@ -1228,8 +1280,9 @@ function renderBoard(){
 
   // Columna especial: pedidos cancelados (fuera del flujo normal)
   const cancelledOrders = ORDERS.filter(o=>o.cancelled && matchesFilters(o));
+  tabStats.push({ id: 'cancelled', label: 'Cancelados', count: cancelledOrders.length });
   const cCol = document.createElement('div');
-  cCol.className = 'col';
+  cCol.className = 'col' + (mobileActiveStage === 'cancelled' ? ' mobile-active' : '');
   cCol.innerHTML = `
     <div class="col-head">
       <div class="num">✕</div>
@@ -1245,6 +1298,7 @@ function renderBoard(){
     cancelledOrders.forEach(o => cDrop.appendChild(renderCard(o)));
   }
   board.appendChild(cCol);
+  renderMobileStageTabs(tabStats);
 }
 
 function renderCard(o){
