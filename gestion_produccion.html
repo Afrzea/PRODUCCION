@@ -492,6 +492,51 @@
     .col{display:none; min-width:100%; max-width:100%; border-right:none;}
     .col.mobile-active{display:flex;}
   }
+  /* ---------- PESTAÑAS PRINCIPALES (Tablero / Despiece / Referencias) ---------- */
+  .main-tabs{
+    display:flex;gap:2px;padding:0 26px;border-bottom:1px solid var(--border-soft);
+    background:var(--panel);overflow-x:auto;
+  }
+  .main-tab{
+    font-family:var(--font-display);text-transform:uppercase;font-size:12.5px;letter-spacing:.3px;
+    padding:12px 16px;border:none;background:transparent;color:var(--text-dim);cursor:pointer;
+    border-bottom:2px solid transparent;white-space:nowrap;
+  }
+  .main-tab:hover{color:var(--text);}
+  .main-tab.active{color:var(--orange);border-bottom-color:var(--orange);font-weight:600;}
+
+  .side-list-item{
+    padding:10px 12px;border:1px solid var(--border);border-radius:3px;margin-bottom:8px;
+    cursor:pointer;background:var(--panel);transition:.12s;
+  }
+  .side-list-item:hover{border-color:var(--text-dim);}
+  .side-list-item.active{border-color:var(--orange);background:var(--panel-alt);cursor:default;}
+  .side-search-input{
+    width:100%;background:var(--panel-alt);border:1px solid var(--border);color:var(--text);
+    padding:9px 10px;border-radius:2px;font-size:13px;margin-bottom:8px;
+  }
+
+  .subview-wrap{display:flex;gap:24px;align-items:flex-start;flex-wrap:wrap;padding:20px 26px 40px;}
+  .subview-side{width:260px;flex-shrink:0;}
+  .subview-main{flex:1;min-width:320px;}
+
+  .despiece-table{width:100%;border-collapse:collapse;font-size:13px;margin-bottom:10px;}
+  .despiece-table th{padding:6px 4px;text-align:left;border-bottom:2px solid var(--border);font-family:var(--font-mono);font-size:10.5px;text-transform:uppercase;color:var(--text-dim);}
+  .despiece-table td{padding:4px;border-bottom:1px solid var(--border-soft);}
+  .despiece-table input{width:100%;border:1px solid var(--border);background:var(--panel-alt);padding:6px;border-radius:2px;font-size:12.5px;color:var(--text);}
+
+  .seccion-box{border:1px solid var(--border-soft);padding:10px;border-radius:3px;margin-bottom:10px;}
+  .seccion-box textarea{
+    width:100%;border:1px solid var(--border);background:var(--panel-alt);color:var(--text);
+    padding:8px;border-radius:2px;font-family:var(--font-mono);font-size:12.5px;resize:vertical;
+  }
+  .seccion-titulo-input{font-weight:600;border:none;background:transparent;padding:0;font-size:13px;flex:1;color:var(--text);font-family:var(--font-body);}
+
+  @media (max-width:760px){
+    .main-tabs{padding:0 16px;}
+    .subview-wrap{padding:16px 16px 30px;flex-direction:column;}
+    .subview-side{width:100%;}
+  }
 </style>
 </head>
 <body>
@@ -530,6 +575,13 @@
   </div>
 </header>
 
+<div class="main-tabs" id="mainTabs">
+  <button class="main-tab active" data-view="tablero" type="button">Tablero</button>
+  <button class="main-tab" data-view="despiece" type="button">Despiece / Corte y doblez</button>
+  <button class="main-tab" data-view="referencias" type="button">Referencias</button>
+</div>
+
+<div id="viewTablero">
 <div class="kpis" id="kpiStrip"></div>
 
 <div class="toolbar">
@@ -575,6 +627,43 @@
 <div class="foot-note" id="footNote">
   Torre de Control de Producción · configura la conexión con tu Hoja de Google para guardado compartido (ver BACKEND_URL en el código).
 </div>
+</div> <!-- /viewTablero -->
+
+<!-- VISTA: Despiece / Corte y doblez -->
+<div id="viewDespiece" style="display:none;">
+  <div class="subview-wrap">
+    <div class="subview-side">
+      <h3 class="analytics-title" style="margin-top:0;">Buscar pedido</h3>
+      <input type="text" id="despieceSearchInput" class="side-search-input" placeholder="Código, cliente o producto..." />
+      <div id="despieceSearchResults"></div>
+      <div id="despieceSelectedSummary" style="margin-top:10px;"></div>
+    </div>
+    <div class="subview-main">
+      <div id="despiecePanel">
+        <div class="empty-col">Busca un pedido arriba y selecciónalo para ver o editar su despiece.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- VISTA: Referencias -->
+<div id="viewReferencias" style="display:none;">
+  <div class="subview-wrap">
+    <div class="subview-side">
+      <h3 class="analytics-title" style="margin-top:0;">Buscar pedido (OP)</h3>
+      <p class="hint" style="margin:0 0 8px;">Solo los pedidos especiales o nuevos necesitan referencia — los productos de línea no.</p>
+      <input type="text" id="referenciaSearchInput" class="side-search-input" placeholder="Código, cliente o producto..." />
+      <div id="referenciaSearchResults"></div>
+      <div id="referenciaSelectedSummary" style="margin-top:10px;"></div>
+    </div>
+    <div class="subview-main">
+      <div id="referenciaPanel">
+        <div class="empty-col">Busca un pedido (OP) arriba para ver o crear su referencia.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
 
 <!-- MODAL: nuevo pedido -->
 <div class="overlay" id="overlayNew">
@@ -1933,6 +2022,470 @@ if(BACKEND_URL){
 }
 setInterval(render, 60000);
 setInterval(pollForUpdates, 45000);
+
+// ========================================================================
+// PESTAÑAS PRINCIPALES: Tablero / Despiece / Referencias
+// ========================================================================
+let despieceLoaded = false;
+let referenciasLoaded = false;
+
+function switchMainView(view){
+  document.getElementById('viewTablero').style.display = view === 'tablero' ? '' : 'none';
+  document.getElementById('viewDespiece').style.display = view === 'despiece' ? '' : 'none';
+  document.getElementById('viewReferencias').style.display = view === 'referencias' ? '' : 'none';
+  document.querySelectorAll('.main-tab').forEach(t => t.classList.toggle('active', t.dataset.view === view));
+  if(view === 'despiece' && !despieceLoaded){ loadDespiece(); }
+  if(view === 'referencias' && !referenciasLoaded){ loadReferencias(); }
+}
+document.querySelectorAll('.main-tab').forEach(tab => {
+  tab.addEventListener('click', () => switchMainView(tab.dataset.view));
+});
+
+// ------------------------------------------------------------------------
+// DESPIECE / CORTE Y DOBLEZ — lista de materiales a cortar por pedido
+// ------------------------------------------------------------------------
+let DESPIECE = [];
+let activeDespieceOrderId = null;
+
+async function loadDespiece(){
+  if(STORAGE_MODE !== 'backend'){
+    despieceLoaded = true;
+    renderDespieceSelectedSummary();
+    return;
+  }
+  try{
+    const res = await xhrRequestWithRetry('POST', BACKEND_URL, JSON.stringify({ token: ACCESS_TOKEN, action: 'read', collection: 'despiece' }), { retries: 3, baseDelayMs: 1000 });
+    const parsed = JSON.parse(res.text);
+    DESPIECE = Array.isArray(parsed) ? parsed : [];
+  }catch(e){
+    console.error('Error cargando despiece', e);
+    alert(connectionErrorMessage(e));
+  }
+  despieceLoaded = true;
+  renderDespieceSelectedSummary();
+}
+
+async function saveDespieceToBackend(){
+  if(STORAGE_MODE !== 'backend'){
+    alert('El despiece no se puede guardar: no hay conexión con el backend en esta sesión.');
+    return false;
+  }
+  try{
+    const res = await xhrRequestWithRetry('POST', BACKEND_URL, JSON.stringify({ token: ACCESS_TOKEN, action: 'save', collection: 'despiece', items: DESPIECE }), { retries: 3, baseDelayMs: 1200 });
+    const parsed = res.text ? JSON.parse(res.text) : null;
+    if(!res.ok || !parsed || parsed.ok !== true){
+      alert('No se pudo guardar el despiece. Intenta de nuevo.');
+      return false;
+    }
+    return true;
+  }catch(e){
+    console.error('Error guardando despiece', e);
+    alert(connectionErrorMessage(e));
+    return false;
+  }
+}
+
+// Buscador de pedidos: en vez de listar todos los pedidos activos (puede
+// ser una lista larga), escribes y ves solo las coincidencias.
+function renderDespieceSearchResults(query){
+  const el = document.getElementById('despieceSearchResults');
+  if(!el) return;
+  const q = (query || '').trim().toLowerCase();
+  if(!q){ el.innerHTML = ''; return; }
+  const matches = ORDERS.filter(o => !o.cancelled && (
+    o.code.toLowerCase().includes(q) ||
+    (o.cliente||'').toLowerCase().includes(q) ||
+    (o.producto||'').toLowerCase().includes(q)
+  )).slice(0, 8);
+  if(!matches.length){
+    el.innerHTML = '<div class="hint" style="padding:6px 2px;">Sin resultados.</div>';
+    return;
+  }
+  el.innerHTML = matches.map(o => `
+    <div class="side-list-item" data-id="${o.id}">
+      <div style="font-family:var(--font-mono);font-size:9.5px;color:var(--text-faint);">${escapeHtml(o.code)}</div>
+      <div style="font-weight:600;font-size:13px;">${escapeHtml(o.producto)}</div>
+      <div style="font-size:11.5px;color:var(--text-dim);">${escapeHtml(o.cliente)}</div>
+    </div>
+  `).join('');
+  el.querySelectorAll('.side-list-item').forEach(item => {
+    item.addEventListener('click', () => {
+      selectDespieceOrder(item.dataset.id);
+      document.getElementById('despieceSearchInput').value = '';
+      el.innerHTML = '';
+    });
+  });
+}
+document.getElementById('despieceSearchInput').addEventListener('input', e => renderDespieceSearchResults(e.target.value));
+
+function renderDespieceSelectedSummary(){
+  const el = document.getElementById('despieceSelectedSummary');
+  if(!el) return;
+  if(!activeDespieceOrderId){ el.innerHTML = ''; return; }
+  const o = ORDERS.find(x => x.id === activeDespieceOrderId);
+  if(!o){ el.innerHTML = ''; return; }
+  el.innerHTML = `
+    <div class="side-list-item active">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:6px;">
+        <div>
+          <div style="font-family:var(--font-mono);font-size:9.5px;color:var(--text-faint);">${escapeHtml(o.code)} · seleccionado</div>
+          <div style="font-weight:600;font-size:13px;">${escapeHtml(o.producto)}</div>
+          <div style="font-size:11.5px;color:var(--text-dim);">${escapeHtml(o.cliente)}</div>
+        </div>
+        <span class="danger-link" id="btnClearDespieceSelection" style="flex-shrink:0;">✕ Quitar</span>
+      </div>
+    </div>
+  `;
+  document.getElementById('btnClearDespieceSelection').addEventListener('click', () => {
+    activeDespieceOrderId = null;
+    renderDespieceSelectedSummary();
+    renderDespiecePanel();
+  });
+}
+
+function selectDespieceOrder(orderId){
+  activeDespieceOrderId = orderId;
+  let entry = DESPIECE.find(d => d.orderId === orderId);
+  if(!entry){
+    const o = ORDERS.find(x => x.id === orderId);
+    entry = { orderId, orderCode: o ? o.code : '', entrega: '', recibe: '', piezas: [] };
+    DESPIECE.push(entry);
+  }
+  renderDespieceSelectedSummary();
+  renderDespiecePanel();
+}
+
+function renderDespiecePanel(){
+  const panel = document.getElementById('despiecePanel');
+  if(!activeDespieceOrderId){
+    panel.innerHTML = '<div class="empty-col">Selecciona un pedido de la lista para ver o editar su despiece.</div>';
+    return;
+  }
+  const o = ORDERS.find(x => x.id === activeDespieceOrderId);
+  const entry = DESPIECE.find(d => d.orderId === activeDespieceOrderId);
+  if(!o || !entry) return;
+  panel.innerHTML = `
+    <h2 style="font-family:var(--font-display);text-transform:uppercase;font-size:19px;margin:0 0 4px;">Piezas para corte y dobles</h2>
+    <div class="hint" style="margin-bottom:14px;">${escapeHtml(o.code)} — ${escapeHtml(o.cliente)} — ${escapeHtml(o.producto)}</div>
+    <table class="despiece-table">
+      <thead>
+        <tr>
+          <th>Piezas</th>
+          <th style="width:100px;">Calibre</th>
+          <th style="width:90px;">Cantidad</th>
+          <th>Descripción</th>
+          <th style="width:28px;"></th>
+        </tr>
+      </thead>
+      <tbody id="despieceRows"></tbody>
+    </table>
+    <button class="btn btn-ghost btn-sm" id="btnAddDespieceRow">+ Agregar fila</button>
+    <div class="grid2" style="margin-top:18px;">
+      <div class="field"><label>Entrega</label><input id="despiece_entrega" type="text" value="${escapeHtml(entry.entrega||'')}" /></div>
+      <div class="field"><label>Recibe</label><input id="despiece_recibe" type="text" value="${escapeHtml(entry.recibe||'')}" /></div>
+    </div>
+    <div class="modal-actions" style="justify-content:flex-start;">
+      <button class="btn btn-primary" id="btnSaveDespiece">Guardar despiece</button>
+    </div>
+  `;
+  renderDespieceRows();
+  document.getElementById('btnAddDespieceRow').addEventListener('click', () => {
+    entry.piezas.push({ piezas: '', calibre: '', cantidad: '', descripcion: '' });
+    renderDespieceRows();
+  });
+  document.getElementById('despiece_entrega').addEventListener('input', e => { entry.entrega = e.target.value; });
+  document.getElementById('despiece_recibe').addEventListener('input', e => { entry.recibe = e.target.value; });
+  document.getElementById('btnSaveDespiece').addEventListener('click', async () => {
+    const btn = document.getElementById('btnSaveDespiece');
+    btn.disabled = true; btn.textContent = 'Guardando...';
+    const ok = await saveDespieceToBackend();
+    btn.disabled = false; btn.textContent = 'Guardar despiece';
+    if(ok) alert('Despiece guardado.');
+  });
+}
+
+function renderDespieceRows(){
+  const entry = DESPIECE.find(d => d.orderId === activeDespieceOrderId);
+  const tbody = document.getElementById('despieceRows');
+  if(!entry || !tbody) return;
+  if(!entry.piezas.length){
+    tbody.innerHTML = '<tr><td colspan="5" style="padding:10px 4px;color:var(--text-faint);">Sin piezas todavía. Agrega una fila.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = entry.piezas.map((p,i) => `
+    <tr data-idx="${i}">
+      <td><input type="text" class="dp-piezas" value="${escapeHtml(p.piezas||'')}" /></td>
+      <td><input type="text" class="dp-calibre" value="${escapeHtml(p.calibre||'')}" /></td>
+      <td><input type="number" min="0" class="dp-cantidad" value="${p.cantidad!==undefined&&p.cantidad!==null?p.cantidad:''}" /></td>
+      <td><input type="text" class="dp-descripcion" value="${escapeHtml(p.descripcion||'')}" /></td>
+      <td style="text-align:center;"><span class="danger-link dp-remove">✕</span></td>
+    </tr>
+  `).join('');
+  tbody.querySelectorAll('tr').forEach(tr => {
+    const idx = parseInt(tr.dataset.idx);
+    tr.querySelector('.dp-piezas').addEventListener('input', e => { entry.piezas[idx].piezas = e.target.value; });
+    tr.querySelector('.dp-calibre').addEventListener('input', e => { entry.piezas[idx].calibre = e.target.value; });
+    tr.querySelector('.dp-cantidad').addEventListener('input', e => { entry.piezas[idx].cantidad = e.target.value; });
+    tr.querySelector('.dp-descripcion').addEventListener('input', e => { entry.piezas[idx].descripcion = e.target.value; });
+    tr.querySelector('.dp-remove').addEventListener('click', () => {
+      entry.piezas.splice(idx, 1);
+      renderDespieceRows();
+    });
+  });
+}
+
+// ------------------------------------------------------------------------
+// REFERENCIAS — plano de corte por referencia (FM, etc.), ligado al pedido
+// especial o nuevo que lo necesita. Los productos de línea no requieren
+// referencia, así que no todos los pedidos van a tener una.
+// ------------------------------------------------------------------------
+let REFERENCIAS = [];
+let activeReferenciaOrderId = null;
+// undefined = sin cambios en la imagen, null = se quitó, string(base64) = imagen nueva
+let pendingRefImageData = undefined;
+
+async function loadReferencias(){
+  if(STORAGE_MODE !== 'backend'){
+    referenciasLoaded = true;
+    renderReferenciaSelectedSummary();
+    return;
+  }
+  try{
+    const res = await xhrRequestWithRetry('POST', BACKEND_URL, JSON.stringify({ token: ACCESS_TOKEN, action: 'read', collection: 'referencias' }), { retries: 3, baseDelayMs: 1000 });
+    const parsed = JSON.parse(res.text);
+    REFERENCIAS = Array.isArray(parsed) ? parsed : [];
+  }catch(e){
+    console.error('Error cargando referencias', e);
+    alert(connectionErrorMessage(e));
+  }
+  referenciasLoaded = true;
+  renderReferenciaSelectedSummary();
+}
+
+async function saveReferenciasToBackend(){
+  if(STORAGE_MODE !== 'backend'){
+    alert('Las referencias no se pueden guardar: no hay conexión con el backend en esta sesión.');
+    return false;
+  }
+  try{
+    // "code" se usa del lado del backend solo para nombrar el archivo de la
+    // imagen en Drive — se rellena con el código del pedido (OP).
+    const itemsToSend = REFERENCIAS.map(r => Object.assign({}, r, { code: r.orderCode || r.nombre || r.orderId }));
+    const res = await xhrRequestWithRetry('POST', BACKEND_URL, JSON.stringify({ token: ACCESS_TOKEN, action: 'save', collection: 'referencias', items: itemsToSend }), { retries: 3, baseDelayMs: 1200 });
+    const parsed = res.text ? JSON.parse(res.text) : null;
+    if(!res.ok || !parsed || parsed.ok !== true){
+      alert('No se pudo guardar la referencia. Intenta de nuevo.');
+      return false;
+    }
+    if(parsed.imageErrors && parsed.imageErrors.length){
+      const detalle = parsed.imageErrors.map(e => e.code + ': ' + e.error).join('\n');
+      alert('⚠️ La referencia se guardó, pero el plano NO se pudo subir a Google Drive.\n\nDetalle técnico (mándale captura de esto a Claude):\n' + detalle);
+    }
+    return true;
+  }catch(e){
+    console.error('Error guardando referencias', e);
+    alert(connectionErrorMessage(e));
+    return false;
+  }
+}
+
+// Buscador de pedidos (OP) — igual que en Despiece. No todos los pedidos
+// necesitan referencia (los productos de línea no la llevan), así que se
+// busca y se selecciona solo el que sí la necesita.
+function renderReferenciaSearchResults(query){
+  const el = document.getElementById('referenciaSearchResults');
+  if(!el) return;
+  const q = (query || '').trim().toLowerCase();
+  if(!q){ el.innerHTML = ''; return; }
+  const matches = ORDERS.filter(o => !o.cancelled && (
+    o.code.toLowerCase().includes(q) ||
+    (o.cliente||'').toLowerCase().includes(q) ||
+    (o.producto||'').toLowerCase().includes(q)
+  )).slice(0, 8);
+  if(!matches.length){
+    el.innerHTML = '<div class="hint" style="padding:6px 2px;">Sin resultados.</div>';
+    return;
+  }
+  el.innerHTML = matches.map(o => `
+    <div class="side-list-item" data-id="${o.id}">
+      <div style="font-family:var(--font-mono);font-size:9.5px;color:var(--text-faint);">${escapeHtml(o.code)}</div>
+      <div style="font-weight:600;font-size:13px;">${escapeHtml(o.producto)}</div>
+      <div style="font-size:11.5px;color:var(--text-dim);">${escapeHtml(o.cliente)}</div>
+    </div>
+  `).join('');
+  el.querySelectorAll('.side-list-item').forEach(item => {
+    item.addEventListener('click', () => {
+      selectReferenciaOrder(item.dataset.id);
+      document.getElementById('referenciaSearchInput').value = '';
+      el.innerHTML = '';
+    });
+  });
+}
+document.getElementById('referenciaSearchInput').addEventListener('input', e => renderReferenciaSearchResults(e.target.value));
+
+function renderReferenciaSelectedSummary(){
+  const el = document.getElementById('referenciaSelectedSummary');
+  if(!el) return;
+  if(!activeReferenciaOrderId){ el.innerHTML = ''; return; }
+  const o = ORDERS.find(x => x.id === activeReferenciaOrderId);
+  if(!o){ el.innerHTML = ''; return; }
+  el.innerHTML = `
+    <div class="side-list-item active">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:6px;">
+        <div>
+          <div style="font-family:var(--font-mono);font-size:9.5px;color:var(--text-faint);">${escapeHtml(o.code)} · seleccionado</div>
+          <div style="font-weight:600;font-size:13px;">${escapeHtml(o.producto)}</div>
+          <div style="font-size:11.5px;color:var(--text-dim);">${escapeHtml(o.cliente)}</div>
+        </div>
+        <span class="danger-link" id="btnClearReferenciaSelection" style="flex-shrink:0;">✕ Quitar</span>
+      </div>
+    </div>
+  `;
+  document.getElementById('btnClearReferenciaSelection').addEventListener('click', () => {
+    activeReferenciaOrderId = null;
+    renderReferenciaSelectedSummary();
+    renderReferenciaPanel();
+  });
+}
+
+// Categorías estándar de Full Seguridad — se precargan (vacías) en cada
+// referencia nueva, para no tener que escribir los títulos cada vez.
+// Se pueden borrar o agregar más desde el panel si un pedido puntual no
+// las necesita todas, o necesita alguna extra.
+const DEFAULT_REFERENCIA_SECCIONES = [
+  'Mesa 3/16', 'Ángulo 1-1/2" x 3/16', 'Varilla 3/4', 'Mecanismo',
+  'Coco exterior', 'Coco interior', 'Conos de Marco', 'Tapa rueda', 'Caleta'
+];
+
+function selectReferenciaOrder(orderId){
+  activeReferenciaOrderId = orderId;
+  pendingRefImageData = undefined;
+  let entry = REFERENCIAS.find(r => r.orderId === orderId);
+  if(!entry){
+    const o = ORDERS.find(x => x.id === orderId);
+    entry = {
+      orderId, orderCode: o ? o.code : '',
+      nombre: o ? o.producto : '', medidas: '', imagen: '',
+      secciones: DEFAULT_REFERENCIA_SECCIONES.map(titulo => ({ titulo, contenido: '' }))
+    };
+    REFERENCIAS.push(entry);
+  }
+  renderReferenciaSelectedSummary();
+  renderReferenciaPanel();
+}
+
+function renderReferenciaPanel(){
+  const panel = document.getElementById('referenciaPanel');
+  if(!activeReferenciaOrderId){
+    panel.innerHTML = '<div class="empty-col">Busca un pedido (OP) arriba para ver o crear su referencia.</div>';
+    return;
+  }
+  const o = ORDERS.find(x => x.id === activeReferenciaOrderId);
+  const r = REFERENCIAS.find(x => x.orderId === activeReferenciaOrderId);
+  if(!o || !r) return;
+  panel.innerHTML = `
+    <h2 style="font-family:var(--font-display);text-transform:uppercase;font-size:19px;margin:0 0 4px;">Referencia / plano de corte</h2>
+    <div class="hint" style="margin-bottom:14px;">${escapeHtml(o.code)} — ${escapeHtml(o.cliente)} — ${escapeHtml(o.producto)}</div>
+    <div class="field"><label>Nombre de la referencia</label><input id="ref_nombre" type="text" value="${escapeHtml(r.nombre||'')}" placeholder="ej. FM70 ESPECIAL" /></div>
+    <div class="field"><label>Medidas / cabezote</label><input id="ref_medidas" type="text" value="${escapeHtml(r.medidas||'')}" placeholder="ej. 70 x 57 x 45 cm cabezote" /></div>
+    <div class="field">
+      <label>Plano / imagen</label>
+      <div id="ref_imagen_current" style="margin-bottom:8px;"></div>
+      <input id="ref_imagen" type="file" accept="image/*" />
+    </div>
+    <div id="ref_secciones"></div>
+    <button class="btn btn-ghost btn-sm" id="btnAddSeccion">+ Agregar sección</button>
+    <div class="modal-actions" style="justify-content:space-between;margin-top:20px;">
+      <span class="danger-link" id="btnDeleteReferencia">Eliminar referencia de este pedido</span>
+      <button class="btn btn-primary" id="btnSaveReferencia">Guardar referencia</button>
+    </div>
+  `;
+
+  const currentImgEl = document.getElementById('ref_imagen_current');
+  if(r.imagen){
+    currentImgEl.innerHTML = `<img src="${driveImgUrl(r.imagen)}" style="max-width:100%;max-height:220px;border:1px solid var(--border);border-radius:3px;display:block;margin-bottom:6px;" /><span class="danger-link" id="btnRemoveRefImg">Quitar esta imagen</span>`;
+    document.getElementById('btnRemoveRefImg').addEventListener('click', () => {
+      pendingRefImageData = null;
+      currentImgEl.innerHTML = '<span class="hint">Se quitará la imagen al guardar.</span>';
+    });
+  } else {
+    currentImgEl.innerHTML = '<span class="hint">Sin imagen todavía.</span>';
+  }
+
+  document.getElementById('ref_imagen').addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if(!file) return;
+    currentImgEl.innerHTML = '<span class="hint">Procesando imagen...</span>';
+    try{
+      pendingRefImageData = await compressImage(file);
+      currentImgEl.innerHTML = `<img src="${pendingRefImageData}" style="max-width:100%;max-height:220px;border:1px solid var(--border);border-radius:3px;" />`;
+    }catch(err){
+      pendingRefImageData = undefined;
+      currentImgEl.innerHTML = '<span class="hint" style="color:var(--red)">No se pudo cargar la imagen.</span>';
+    }
+  });
+
+  renderSecciones();
+  document.getElementById('btnAddSeccion').addEventListener('click', () => {
+    r.secciones.push({ titulo: 'Nueva sección', contenido: '' });
+    renderSecciones();
+  });
+  document.getElementById('ref_nombre').addEventListener('input', e => { r.nombre = e.target.value; });
+  document.getElementById('ref_medidas').addEventListener('input', e => { r.medidas = e.target.value; });
+
+  document.getElementById('btnDeleteReferencia').addEventListener('click', async () => {
+    if(!confirm('¿Quitar la referencia de este pedido?')) return;
+    REFERENCIAS = REFERENCIAS.filter(x => x.orderId !== r.orderId);
+    activeReferenciaOrderId = null;
+    const ok = await saveReferenciasToBackend();
+    if(!ok){ REFERENCIAS.push(r); } // si falla el guardado, no se pierde localmente
+    renderReferenciaSelectedSummary();
+    renderReferenciaPanel();
+  });
+
+  document.getElementById('btnSaveReferencia').addEventListener('click', async () => {
+    if(pendingRefImageData !== undefined){ r.imagen = pendingRefImageData; }
+    const btn = document.getElementById('btnSaveReferencia');
+    btn.disabled = true; btn.textContent = 'Guardando...';
+    const ok = await saveReferenciasToBackend();
+    if(ok){
+      pendingRefImageData = undefined;
+      await loadReferencias();
+      renderReferenciaSelectedSummary();
+      renderReferenciaPanel();
+      alert('Referencia guardada.');
+    }
+    btn.disabled = false; btn.textContent = 'Guardar referencia';
+  });
+}
+
+function renderSecciones(){
+  const r = REFERENCIAS.find(x => x.orderId === activeReferenciaOrderId);
+  const el = document.getElementById('ref_secciones');
+  if(!r || !el) return;
+  if(!r.secciones.length){
+    el.innerHTML = '<div class="hint" style="margin:10px 0;">Sin secciones todavía. Agrega una (ej. "Mesa 3/16", "Mecanismo", "Coco exterior"...).</div>';
+    return;
+  }
+  el.innerHTML = r.secciones.map((s,i) => `
+    <div class="seccion-box" data-idx="${i}">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px;">
+        <input class="seccion-titulo-input" type="text" value="${escapeHtml(s.titulo||'')}" />
+        <span class="danger-link seccion-delete">Quitar</span>
+      </div>
+      <textarea rows="4" placeholder="ej. 1→52.4 x 49cm C14...">${escapeHtml(s.contenido||'')}</textarea>
+    </div>
+  `).join('');
+  el.querySelectorAll('[data-idx]').forEach(div => {
+    const idx = parseInt(div.dataset.idx);
+    div.querySelector('.seccion-titulo-input').addEventListener('input', e => { r.secciones[idx].titulo = e.target.value; });
+    div.querySelector('textarea').addEventListener('input', e => { r.secciones[idx].contenido = e.target.value; });
+    div.querySelector('.seccion-delete').addEventListener('click', () => {
+      r.secciones.splice(idx, 1);
+      renderSecciones();
+    });
+  });
+}
 </script>
 </body>
 </html>
