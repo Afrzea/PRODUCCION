@@ -2,75 +2,19 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8">
-<!-- =====================================================================
-     PUERTA FULL SEGURIDAD — pegar justo después de <head> en cada herramienta
-     Solo deja ver la herramienta si se abre dentro del portal, con una
-     sesión válida y con permiso para esa herramienta.
-     Cambiar en cada archivo:  FS_APP  (torre, ventas, servicios, registro)
-     ===================================================================== -->
-<style>
-  html.fs-cerrado body{visibility:hidden!important}
-  html.fs-cerrado::before{
-    content:"Verificando acceso…";position:fixed;inset:0;z-index:2147483647;
-    display:flex;align-items:center;justify-content:center;
-    background:#F3F4F6;color:#6B7178;font:15px system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
-  }
-</style>
+<!-- ===== PUERTA FULL SEGURIDAD (la lógica vive en el portal: puerta.js) ===== -->
 <script>
-(function () {
-  var FS_PORTAL = 'https://sistema-de-informacion-fullseguridad.netlify.app';   // dirección del portal (sin / al final)
-  var FS_API    = 'https://script.google.com/macros/s/AKfycbwqkPFeP954RZNIP2PfzH442qa-hqrrZDNfPjOORE8movVLDTo55_PvddcyqPZtAucf/exec';
-  var FS_APP    = 'torre';                        // ID de esta herramienta en la hoja APPS
-  var FS_PUBLICO = [];                            // parámetros que SÍ se ven sin portal (ej. ['t'] para la placa QR)
-
-  var q = new URLSearchParams(location.search);
-  for (var i = 0; i < FS_PUBLICO.length; i++) if (q.has(FS_PUBLICO[i])) return;   // vista pública: sin puerta
-
-  var html = document.documentElement, resuelto = false;
-  html.classList.add('fs-cerrado');
-
-  function bloquear(texto) {
-    if (resuelto) return; resuelto = true;
-    function pintar() {
-      document.body.style.margin = '0';
-      document.body.innerHTML =
-        '<div style="min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;' +
-        'padding:24px;text-align:center;background:#1A1D20;color:#ECE6D6;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif">' +
-        '<svg width="46" height="46" viewBox="0 0 24 24" fill="none" stroke="#D1A92E" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
-        '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>' +
-        '<div style="font-size:20px;font-weight:600">Acceso solo desde el portal</div>' +
-        '<div style="color:#9097A0;max-width:320px;line-height:1.5">' + texto + '</div>' +
-        '<a href="' + FS_PORTAL + '" target="_top" style="margin-top:6px;padding:10px 20px;border-radius:999px;' +
-        'background:#A58100;color:#1A1D20;font-weight:600;text-decoration:none">Ir al portal</a></div>';
-      html.classList.remove('fs-cerrado');
-    }
-    if (document.body) pintar(); else document.addEventListener('DOMContentLoaded', pintar);
-  }
-  function abrir() { if (resuelto) return; resuelto = true; html.classList.remove('fs-cerrado'); }
-
-  // Abierta directo (fuera del portal): se manda al portal, que la abre después de ingresar
-  if (window.top === window) {
-    bloquear('Esta herramienta de Full Seguridad solo se abre ingresando al portal con tu usuario y clave.');
-    location.replace(FS_PORTAL + '/?abrir=' + encodeURIComponent(FS_APP) + (location.search ? '&q=' + encodeURIComponent(location.search) : ''));
-    return;
-  }
-
-  window.addEventListener('message', function (e) {
-    if (e.origin !== FS_PORTAL || !e.data || e.data.tipo !== 'fs-token' || resuelto) return;
-    fetch(FS_API, { method: 'POST', body: JSON.stringify({ accion: 'validar', token: e.data.token, app: FS_APP }) })
-      .then(function (r) { return r.json(); })
-      .then(function (r) {
-        if (r.ok) abrir();
-        else bloquear(r.motivo === 'permiso' ? 'Tu usuario no tiene acceso a esta herramienta.' : 'Tu sesión venció. Vuelve a ingresar al portal.');
-      })
-      .catch(function () { bloquear('No se pudo verificar el acceso. Revisa el internet e intenta de nuevo.'); });
-  });
-
-  window.parent.postMessage({ tipo: 'fs-pedir-token' }, FS_PORTAL);
-  setTimeout(function () { bloquear('No se pudo verificar el acceso. Abre la herramienta desde el portal.'); }, 15000);
-})();
+  window.FS_APP = 'torre'; window.FS_PUBLICO = [];
+  window.FS_FALLA = function () {   // si no carga la puerta, la herramienta queda oculta
+    var q = new URLSearchParams(location.search);
+    for (var i = 0; i < FS_PUBLICO.length; i++) if (q.has(FS_PUBLICO[i])) return;
+    var s = document.createElement('style');
+    s.textContent = 'body{display:none!important}html::before{content:"No se pudo verificar el acceso. Revisa el internet e intenta de nuevo.";position:fixed;inset:0;display:flex;align-items:center;justify-content:center;padding:24px;text-align:center;background:#1A1D20;color:#ECE6D6;font:16px system-ui,sans-serif}';
+    document.head.appendChild(s);
+  };
 </script>
-<!-- ======================== FIN PUERTA ======================== -->
+<script src="https://sistema-de-informacion-fullseguridad.netlify.app/puerta.js" onerror="FS_FALLA()"></script>
+<!-- ===== FIN PUERTA ===== -->
 
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Torre de Control — Producción Full Seguridad</title>
