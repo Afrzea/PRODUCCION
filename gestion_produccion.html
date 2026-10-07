@@ -698,6 +698,21 @@
         </select>
       </div>
     </div>
+    <div class="grid2">
+      <div class="field"><label>Instalación</label>
+        <select id="f_instalar">
+          <option value="no">No</option>
+          <option value="si">Sí</option>
+        </select>
+      </div>
+      <div class="field"><label>Lugar de entrega</label>
+        <select id="f_lugar">
+          <option value="planta">En planta</option>
+          <option value="cliente">Dirección del cliente</option>
+        </select>
+      </div>
+    </div>
+    <div class="field" id="f_direccion_wrap" style="display:none;"><label>Dirección del cliente</label><input id="f_direccion" type="text" placeholder="Dirección y ciudad" /></div>
     <div class="field"><label>Fecha de entrega comprometida</label><input id="f_fecha" type="date" /></div>
     <div class="field">
       <label>Plano / imagen del producto (opcional)</label>
@@ -743,6 +758,21 @@
         </select>
       </div>
     </div>
+    <div class="grid2">
+      <div class="field"><label>Instalación</label>
+        <select id="e_instalar">
+          <option value="no">No</option>
+          <option value="si">Sí</option>
+        </select>
+      </div>
+      <div class="field"><label>Lugar de entrega</label>
+        <select id="e_lugar">
+          <option value="planta">En planta</option>
+          <option value="cliente">Dirección del cliente</option>
+        </select>
+      </div>
+    </div>
+    <div class="field" id="e_direccion_wrap" style="display:none;"><label>Dirección del cliente</label><input id="e_direccion" type="text" placeholder="Dirección y ciudad" /></div>
     <div class="field"><label>Fecha de entrega comprometida</label><input id="e_fecha" type="date" /></div>
     <div class="field">
       <label>Plano / imagen del producto</label>
@@ -1492,6 +1522,10 @@ function renderCard(o){
       <span class="tag ${st.level}">${st.text}</span>
     </div>
     <div class="row"><span style="color:var(--text-faint)">Entrega</span><span style="font-family:var(--font-mono)">${o.fechaEntrega||'—'}</span></div>
+    ${(o.instalar==='si' || o.lugarEntrega==='cliente') ? `<div class="row" style="justify-content:flex-start;gap:6px;flex-wrap:wrap;">
+      ${o.instalar==='si' ? '<span class="tag warn">🔧 Instalar</span>' : ''}
+      ${o.lugarEntrega==='cliente' ? '<span class="tag ok">🚚 Donde el cliente</span>' : ''}
+    </div>` : ''}
     ${quickMoveHtml}
   `;
 
@@ -1545,6 +1579,20 @@ async function moveOrderToStage(id, targetStageId, viaButton=false, direction=1)
   render();
 }
 
+['f','e'].forEach(pre=>{
+  document.getElementById(pre+'_lugar').addEventListener('change', ()=>{
+    document.getElementById(pre+'_direccion_wrap').style.display =
+      document.getElementById(pre+'_lugar').value === 'cliente' ? '' : 'none';
+  });
+});
+function textoEntrega(o){
+  const partes = [];
+  if(o.instalar === 'si') partes.push('Con instalación');
+  else if(o.instalar === 'no') partes.push('Sin instalación');
+  if(o.lugarEntrega === 'cliente') partes.push('Entrega en dirección del cliente' + (o.direccionEntrega ? ': ' + o.direccionEntrega : ''));
+  else if(o.lugarEntrega === 'planta') partes.push('Entrega en planta');
+  return partes.join(' · ');
+}
 function openNewOrderModal(){
   document.getElementById('overlayNew').classList.add('show');
 }
@@ -1559,6 +1607,9 @@ async function createOrder(){
   const cantidad = parseInt(document.getElementById('f_cantidad').value) || 1;
   const prioridad = document.getElementById('f_prioridad').value;
   const fechaEntrega = document.getElementById('f_fecha').value;
+  const instalar = document.getElementById('f_instalar').value;
+  const lugarEntrega = document.getElementById('f_lugar').value;
+  const direccionEntrega = lugarEntrega === 'cliente' ? document.getElementById('f_direccion').value.trim() : '';
 
   if(!cliente || !producto){
     alert('Ingresa al menos el cliente y el producto.');
@@ -1569,6 +1620,7 @@ async function createOrder(){
     id: 'o_' + t + '_' + Math.random().toString(36).slice(2,7),
     code: genCode(),
     cliente, producto, specs, cantidad, prioridad, fechaEntrega,
+    instalar, lugarEntrega, direccionEntrega,
     imagen: pendingImageData || null,
     currentStage: 'ventas',
     createdAt: t,
@@ -1579,7 +1631,10 @@ async function createOrder(){
   if(!ok){ ORDERS.pop(); return; }
   syncKnownIds();
   closeOverlay('overlayNew');
-  ['f_cliente','f_producto','f_specs','f_fecha'].forEach(id=>document.getElementById(id).value='');
+  ['f_cliente','f_producto','f_specs','f_fecha','f_direccion'].forEach(id=>document.getElementById(id).value='');
+  document.getElementById('f_instalar').value = 'no';
+  document.getElementById('f_lugar').value = 'planta';
+  document.getElementById('f_direccion_wrap').style.display = 'none';
   document.getElementById('f_cantidad').value = 1;
   document.getElementById('f_imagen').value = '';
   document.getElementById('f_imagen_preview').innerHTML = '';
@@ -1616,6 +1671,10 @@ function openEditModal(id){
   document.getElementById('e_cantidad').value = o.cantidad || 1;
   document.getElementById('e_prioridad').value = o.prioridad || 'media';
   document.getElementById('e_fecha').value = o.fechaEntrega || '';
+  document.getElementById('e_instalar').value = o.instalar === 'si' ? 'si' : 'no';
+  document.getElementById('e_lugar').value = o.lugarEntrega === 'cliente' ? 'cliente' : 'planta';
+  document.getElementById('e_direccion').value = o.direccionEntrega || '';
+  document.getElementById('e_direccion_wrap').style.display = o.lugarEntrega === 'cliente' ? '' : 'none';
   pendingEditImageData = undefined;
 
   const current = document.getElementById('e_imagen_current');
@@ -1665,6 +1724,9 @@ async function saveEdit(){
   o.cantidad = parseInt(document.getElementById('e_cantidad').value) || 1;
   o.prioridad = document.getElementById('e_prioridad').value;
   o.fechaEntrega = document.getElementById('e_fecha').value;
+  o.instalar = document.getElementById('e_instalar').value;
+  o.lugarEntrega = document.getElementById('e_lugar').value;
+  o.direccionEntrega = o.lugarEntrega === 'cliente' ? document.getElementById('e_direccion').value.trim() : '';
   if(pendingEditImageData !== undefined){
     o.imagen = pendingEditImageData; // null (se quitó) o base64 nuevo
   }
@@ -1688,6 +1750,7 @@ function openDetail(id){
   document.getElementById('d_meta').innerHTML = `
     Cliente: <strong>${escapeHtml(o.cliente)}</strong> · Cantidad: ${o.cantidad} · Prioridad: ${o.prioridad}<br/>
     Entrega comprometida: ${o.fechaEntrega || '—'}<br/>
+    ${textoEntrega(o) ? escapeHtml(textoEntrega(o)) + '<br/>' : ''}
     ${o.specs ? 'Especificaciones: '+escapeHtml(o.specs) : ''}
     ${o.cancelled ? `<div style="margin-top:8px;color:var(--red);">✕ Cancelado el ${fmtDate(o.cancelledAt)} por ${escapeHtml(o.cancelledBy||'')}${o.cancelReason ? ' — Motivo: '+escapeHtml(o.cancelReason) : ''}</div>` : ''}
     ${o.imagen ? `<div style="margin-top:10px;"><img src="${driveImgUrl(o.imagen)}" style="max-width:100%;max-height:280px;border:1px solid var(--border);border-radius:3px;" /></div>` : ''}
