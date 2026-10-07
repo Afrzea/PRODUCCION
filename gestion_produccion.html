@@ -154,6 +154,18 @@
   .spacer{flex:1;}
   .hint{color:var(--text-faint);font-size:11.5px;}
 
+  /* ---------- BARRA DESLIZANTE SUPERIOR (siempre visible arriba) ---------- */
+  #boardScrollTop{
+    position:sticky; top:0; z-index:30;
+    overflow-x:auto; overflow-y:hidden; height:16px;
+    margin:0 26px; background:transparent;
+  }
+  #boardScrollTop::-webkit-scrollbar{height:12px;}
+  #boardScrollTop::-webkit-scrollbar-thumb{background:var(--accent, #A58100);border-radius:6px;}
+  #boardScrollTopInner{height:1px;}
+  #boardScrollTop.sin-desborde{display:none;}
+  @media (max-width:760px){ #boardScrollTop{display:none;} }
+
   /* ---------- BOARD ---------- */
   #board{
     display:flex;
@@ -173,7 +185,7 @@
   .col-head{
     padding:10px 2px 12px;
     position:sticky;
-    top:0;
+    top:16px;
   }
   .col-head .num{
     font-family:var(--font-mono);
@@ -612,7 +624,10 @@
 
 <div class="mobile-stage-tabs" id="mobileStageTabs"></div>
 
+<div id="boardWrap">
+<div id="boardScrollTop" aria-hidden="true"><div id="boardScrollTopInner"></div></div>
 <div id="board"></div>
+</div>
 
 <div class="bottleneck-section" id="bottleneckSection">
   <h3 class="analytics-title">Cuellos de botella — dónde se atasca la producción</h3>
@@ -2563,6 +2578,25 @@ function renderSecciones(){
     });
   });
 }
+
+/* Barra deslizante superior: se mueve junto con el tablero */
+(function(){
+  const arriba = document.getElementById('boardScrollTop');
+  const interior = document.getElementById('boardScrollTopInner');
+  const board = document.getElementById('board');
+  if(!arriba || !board) return;
+  let moviendo = false;
+  function medir(){
+    interior.style.width = board.scrollWidth + 'px';
+    arriba.classList.toggle('sin-desborde', board.scrollWidth <= board.clientWidth + 2);
+    arriba.scrollLeft = board.scrollLeft;
+  }
+  arriba.addEventListener('scroll', ()=>{ if(moviendo){ moviendo=false; return; } moviendo=true; board.scrollLeft = arriba.scrollLeft; });
+  board.addEventListener('scroll', ()=>{ if(moviendo){ moviendo=false; return; } moviendo=true; arriba.scrollLeft = board.scrollLeft; });
+  new MutationObserver(medir).observe(board, {childList:true, subtree:true});
+  window.addEventListener('resize', medir);
+  medir();
+})();
 </script>
 </body>
 </html>
