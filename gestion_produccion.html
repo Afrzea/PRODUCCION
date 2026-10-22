@@ -433,6 +433,28 @@
     .analytics-section{grid-template-columns:1fr;}
   }
 
+  /* ---------- AVISO DE PEDIDO NUEVO (ventana grande hasta dar OK) ---------- */
+  .pn-overlay{position:fixed;inset:0;z-index:400;background:rgba(8,10,13,.78);display:flex;align-items:center;justify-content:center;padding:20px;animation:pnFade .25s ease-out}
+  .pn-caja{background:var(--panel);width:100%;max-width:560px;max-height:calc(100vh - 40px);display:flex;flex-direction:column;border-radius:6px;border-top:6px solid var(--orange);box-shadow:0 24px 60px rgba(0,0,0,.45);animation:pnPop .35s cubic-bezier(.2,.9,.3,1.2)}
+  .pn-enc{padding:26px 28px 10px;text-align:center}
+  .pn-etq{display:inline-block;font:700 13px var(--font-display);letter-spacing:.18em;color:#fff;background:var(--orange);padding:5px 12px;border-radius:3px;animation:pnPulso 1.6s ease-in-out infinite}
+  .pn-titulo{font:600 30px/1.15 var(--font-display);margin:14px 0 4px;color:var(--text);text-transform:uppercase;letter-spacing:.02em}
+  .pn-sub{color:var(--muted,#6b6455);font-size:14px;margin:0}
+  .pn-lista{overflow-y:auto;padding:8px 28px 4px;display:flex;flex-direction:column;gap:10px}
+  .pn-item{border:1px solid var(--border);border-left:4px solid var(--orange);border-radius:4px;padding:12px 14px;background:var(--panel-alt)}
+  .pn-cod{font:600 13px var(--font-display);letter-spacing:.08em;color:var(--orange)}
+  .pn-prod{font:600 20px/1.2 var(--font-display);margin:2px 0;color:var(--text)}
+  .pn-cli{font-size:15px;color:var(--text)}
+  .pn-det{font-size:13px;color:var(--muted,#6b6455);margin-top:6px;display:flex;flex-wrap:wrap;gap:6px 14px}
+  .pn-pie{padding:16px 28px 24px}
+  .pn-ok{width:100%;font:600 18px var(--font-display);letter-spacing:.08em;padding:14px;border:0;border-radius:4px;background:var(--orange);color:#fff;cursor:pointer}
+  .pn-ok:hover{filter:brightness(.92)}
+  .pn-ok:focus-visible{outline:3px solid var(--text);outline-offset:3px}
+  @keyframes pnFade{from{opacity:0}to{opacity:1}}
+  @keyframes pnPop{from{transform:scale(.9);opacity:0}to{transform:none;opacity:1}}
+  @keyframes pnPulso{50%{opacity:.6}}
+  @media (prefers-reduced-motion:reduce){.pn-overlay,.pn-caja,.pn-etq{animation:none}}
+
   /* ---------- MODAL ---------- */
   .overlay{
     position:fixed;inset:0;background:rgba(8,10,13,0.72);
@@ -1096,6 +1118,7 @@ async function attemptLogin(){
       setFooterNote('Torre de Control de Producción · datos guardados en tu Hoja de Google compartida.');
       document.getElementById('loginGate').classList.remove('show');
       render();
+      revisarPedidosNuevos();
     } else if(parsed && parsed.ok === false){
       errEl.textContent = 'Clave de acceso incorrecta. Verifica con tu administrador.';
       errEl.style.display = 'block';
@@ -1246,6 +1269,71 @@ function showToast(text){
   setTimeout(()=> item.remove(), 9000);
 }
 
+/* ===== Aviso de pedido nuevo =====
+   Cada persona (en su equipo) ve una ventana grande con los pedidos que aún no ha
+   confirmado, al abrir la Torre o cuando entran mientras la tiene abierta.
+   No se cierra hasta que toque OK. Quien crea el pedido no recibe su propio aviso. */
+const VISTOS_KEY = 'torre_pedidos_vistos';
+function leerVistos(){
+  try{ const v = localStorage.getItem(VISTOS_KEY); return v === null ? null : new Set(JSON.parse(v)); }catch(e){ return null; }
+}
+function guardarVistos(set){
+  try{ localStorage.setItem(VISTOS_KEY, JSON.stringify([...set].slice(-2000))); }catch(e){}
+}
+function marcarVistos(ids){
+  const v = leerVistos() || new Set();
+  ids.forEach(id => v.add(id));
+  guardarVistos(v);
+}
+let pnMostrando = new Set();
+function revisarPedidosNuevos(){
+  let vistos = leerVistos();
+  if(vistos === null){
+    // Primera vez en este equipo: lo que ya existía no se anuncia
+    guardarVistos(new Set(ORDERS.map(o=>o.id)));
+    return;
+  }
+  const pendientes = ORDERS.filter(o => !vistos.has(o.id) && o.currentStage !== 'entregado' && !o.cancelled);
+  if(pendientes.length) mostrarAvisoPedidos(pendientes);
+}
+function mostrarAvisoPedidos(lista){
+  lista.forEach(o => pnMostrando.add(o.id));
+  const todos = ORDERS.filter(o => pnMostrando.has(o.id)).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
+  let ov = document.getElementById('pnOverlay');
+  if(!ov){
+    ov = document.createElement('div');
+    ov.id = 'pnOverlay'; ov.className = 'pn-overlay';
+    ov.setAttribute('role','alertdialog'); ov.setAttribute('aria-modal','true'); ov.setAttribute('aria-labelledby','pnTitulo');
+    document.body.appendChild(ov);
+  }
+  const n = todos.length;
+  const prio = p => ({alta:'Prioridad alta', urgente:'Urgente', media:'Prioridad media', baja:'Prioridad baja'}[String(p||'').toLowerCase()] || '');
+  ov.innerHTML = `<div class="pn-caja">
+    <div class="pn-enc">
+      <span class="pn-etq">${n===1?'PEDIDO NUEVO':n+' PEDIDOS NUEVOS'}</span>
+      <h2 class="pn-titulo" id="pnTitulo">${n===1?'Entró un pedido nuevo':'Entraron '+n+' pedidos nuevos'}</h2>
+      <p class="pn-sub">${n===1?'Revísalo':'Revísalos'} y confirma con OK.</p>
+    </div>
+    <div class="pn-lista">${todos.map(o=>`<div class="pn-item">
+      <div class="pn-cod">${escapeHtml(o.code||'')}</div>
+      <div class="pn-prod">${escapeHtml(o.producto||'')}${o.cantidad>1?' × '+o.cantidad:''}</div>
+      <div class="pn-cli">${escapeHtml(o.cliente||'')}</div>
+      <div class="pn-det">
+        ${o.fechaEntrega?`<span>📅 Entrega: ${escapeHtml(o.fechaEntrega)}</span>`:''}
+        ${prio(o.prioridad)?`<span>${escapeHtml(prio(o.prioridad))}</span>`:''}
+        ${o.instalar==='si'?'<span>🔧 Instalar</span>':''}
+        ${o.lugarEntrega==='cliente'?'<span>🚚 Donde el cliente</span>':''}
+      </div>
+    </div>`).join('')}</div>
+    <div class="pn-pie"><button class="pn-ok" id="pnOk">OK, ENTERADO</button></div>
+  </div>`;
+  const ok = document.getElementById('pnOk');
+  ok.onclick = () => { marcarVistos([...pnMostrando]); pnMostrando = new Set(); ov.remove(); };
+  setTimeout(()=> ok.focus(), 50);
+}
+// Esc no cierra la ventana: solo el botón OK
+document.addEventListener('keydown', e => { if(e.key === 'Escape' && document.getElementById('pnOverlay')) e.stopImmediatePropagation(); }, true);
+
 function notifyNewOrders(newOnes){
   newOnes.forEach(o=>{
     showToast('🆕 Nuevo pedido: ' + o.code + ' — ' + o.producto + ' (' + o.cliente + ')');
@@ -1279,6 +1367,7 @@ async function pollForUpdates(){
     syncKnownIds();
     if(newOnes.length){
       notifyNewOrders(newOnes);
+      revisarPedidosNuevos();
     }
     render();
     if(pollFailCount >= 3 && connectionLostNotified){
@@ -1644,6 +1733,7 @@ async function createOrder(){
   ORDERS.push(order);
   const ok = await saveOrders();
   if(!ok){ ORDERS.pop(); return; }
+  marcarVistos([order.id]);
   syncKnownIds();
   closeOverlay('overlayNew');
   ['f_cliente','f_producto','f_specs','f_fecha','f_direccion'].forEach(id=>document.getElementById(id).value='');
