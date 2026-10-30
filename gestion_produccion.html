@@ -2669,22 +2669,29 @@ function renderSecciones(){
   });
 }
 
-/* Barra deslizante superior: se mueve junto con el tablero */
+/* Barra deslizante superior: se mueve junto con el tablero.
+   Se vuelve a medir cuando el tablero cambia de tamaño o vuelve a verse (al regresar
+   desde el escritorio del portal o desde otra pestaña). Si el tablero está oculto
+   no se mide, para que la barra no quede escondida por error. */
 (function(){
   const arriba = document.getElementById('boardScrollTop');
   const interior = document.getElementById('boardScrollTopInner');
   const board = document.getElementById('board');
   if(!arriba || !board) return;
-  let moviendo = false;
   function medir(){
+    if(board.clientWidth === 0) return;                 // tablero oculto: no decidir nada
     interior.style.width = board.scrollWidth + 'px';
     arriba.classList.toggle('sin-desborde', board.scrollWidth <= board.clientWidth + 2);
-    arriba.scrollLeft = board.scrollLeft;
+    if(Math.abs(arriba.scrollLeft - board.scrollLeft) > 1) arriba.scrollLeft = board.scrollLeft;
   }
-  arriba.addEventListener('scroll', ()=>{ if(moviendo){ moviendo=false; return; } moviendo=true; board.scrollLeft = arriba.scrollLeft; });
-  board.addEventListener('scroll', ()=>{ if(moviendo){ moviendo=false; return; } moviendo=true; arriba.scrollLeft = board.scrollLeft; });
-  new MutationObserver(medir).observe(board, {childList:true, subtree:true});
+  arriba.addEventListener('scroll', ()=>{ if(Math.abs(board.scrollLeft - arriba.scrollLeft) > 1) board.scrollLeft = arriba.scrollLeft; });
+  board.addEventListener('scroll', ()=>{ if(Math.abs(arriba.scrollLeft - board.scrollLeft) > 1) arriba.scrollLeft = board.scrollLeft; });
+  new MutationObserver(()=>requestAnimationFrame(medir)).observe(board, {childList:true, subtree:true});
+  if('ResizeObserver' in window) new ResizeObserver(()=>medir()).observe(board);
   window.addEventListener('resize', medir);
+  document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) setTimeout(medir, 50); });
+  window.addEventListener('focus', ()=>setTimeout(medir, 50));
+  setInterval(medir, 3000);                              // respaldo por si algo cambió sin aviso
   medir();
 })();
 </script>
