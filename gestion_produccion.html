@@ -433,6 +433,18 @@
     .analytics-section{grid-template-columns:1fr;}
   }
 
+  /* ---------- PLANOS (hasta 3, imagen o PDF) ---------- */
+  .planos-lista{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0}
+  .plano-item{position:relative;width:96px;height:96px;border:1px solid var(--border);border-radius:4px;overflow:hidden;background:var(--panel-alt);display:flex;align-items:center;justify-content:center;text-decoration:none;color:var(--text)}
+  .plano-item img{width:100%;height:100%;object-fit:cover;display:block}
+  .plano-pdf{flex-direction:column;gap:4px;font-size:11px;text-align:center;padding:6px}
+  .plano-pdf b{font-size:26px;line-height:1}
+  .plano-pdf span{display:block;max-width:84px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .plano-quitar{position:absolute;top:3px;right:3px;width:22px;height:22px;border-radius:50%;border:0;background:rgba(0,0,0,.65);color:#fff;font-size:14px;line-height:22px;cursor:pointer;padding:0}
+  .planos-detalle{display:flex;flex-wrap:wrap;gap:10px;margin-top:10px}
+  .planos-detalle .plano-item{width:150px;height:150px}
+  .planos-hint{font-size:12px;color:var(--text-faint)}
+
   /* ---------- AVISO DE PEDIDO NUEVO (ventana grande hasta dar OK) ---------- */
   .pn-overlay{position:fixed;inset:0;z-index:400;background:rgba(8,10,13,.78);display:flex;align-items:center;justify-content:center;padding:20px;animation:pnFade .25s ease-out}
   .pn-caja{background:var(--panel);width:100%;max-width:560px;max-height:calc(100vh - 40px);display:flex;flex-direction:column;border-radius:6px;border-top:6px solid var(--orange);box-shadow:0 24px 60px rgba(0,0,0,.45);animation:pnPop .35s cubic-bezier(.2,.9,.3,1.2)}
@@ -752,9 +764,9 @@
     <div class="field" id="f_direccion_wrap" style="display:none;"><label>Dirección del cliente</label><input id="f_direccion" type="text" placeholder="Dirección y ciudad" /></div>
     <div class="field"><label>Fecha de entrega comprometida</label><input id="f_fecha" type="date" /></div>
     <div class="field">
-      <label>Plano / imagen del producto (opcional)</label>
-      <input id="f_imagen" type="file" accept="image/*" />
-      <div id="f_imagen_preview" style="margin-top:8px;"></div>
+      <label>Planos del producto (opcional · hasta 3, imágenes o PDF)</label>
+      <input id="f_imagen" type="file" accept="image/*,application/pdf" multiple />
+      <div id="f_imagen_preview" class="planos-lista"></div>
     </div>
     <div class="modal-actions">
       <button class="btn btn-ghost" data-close="overlayNew">Cancelar</button>
@@ -812,10 +824,10 @@
     <div class="field" id="e_direccion_wrap" style="display:none;"><label>Dirección del cliente</label><input id="e_direccion" type="text" placeholder="Dirección y ciudad" /></div>
     <div class="field"><label>Fecha de entrega comprometida</label><input id="e_fecha" type="date" /></div>
     <div class="field">
-      <label>Plano / imagen del producto</label>
-      <div id="e_imagen_current" style="margin-bottom:8px;"></div>
-      <input id="e_imagen" type="file" accept="image/*" />
-      <div id="e_imagen_preview" style="margin-top:8px;"></div>
+      <label>Planos del producto (hasta 3, imágenes o PDF)</label>
+      <div id="e_imagen_current" class="planos-lista"></div>
+      <input id="e_imagen" type="file" accept="image/*,application/pdf" multiple />
+      <div id="e_imagen_preview"></div>
     </div>
     <div class="modal-actions">
       <button class="btn btn-ghost" data-close="overlayEdit">Cancelar</button>
@@ -1023,7 +1035,46 @@ function genCode(){
   return 'OP-'+new Date().getFullYear()+'-'+n;
 }
 
-let pendingImageData = null;
+/* ===== Planos: hasta 3 por pedido, imágenes (se comprimen) o PDF (máx. 10 MB) =====
+   order.planos = [{url, tipo:'img'|'pdf', nombre}]. Los nuevos van con {data} en base64
+   y el Apps Script los sube a Drive y devuelve el link. */
+const MAX_PLANOS = 3, MAX_MB_PDF = 10;
+let planosNuevo = [];      // formulario de pedido nuevo
+let planosEdit = [];       // formulario de edición
+function planosDe(o){
+  if(Array.isArray(o.planos)) return o.planos.filter(p=>p && (p.url || p.data));
+  return o.imagen ? [{url:o.imagen, tipo:'img', nombre:''}] : [];
+}
+function srcPlano(p){ return p.data || (p.tipo === 'pdf' ? p.url : driveImgUrl(p.url)); }
+function pintarPlanos(cont, lista, alQuitar){
+  cont.innerHTML = lista.map((p,i)=>`<div class="plano-item${p.tipo==='pdf'?' plano-pdf':''}">
+      ${p.tipo==='pdf' ? `<b>📄</b><span>${escapeHtml(p.nombre || 'PDF')}</span>` : `<img src="${srcPlano(p)}" alt="Plano ${i+1}">`}
+      <button type="button" class="plano-quitar" data-quitar-plano="${i}" aria-label="Quitar plano ${i+1}">×</button>
+    </div>`).join('') + (lista.length < MAX_PLANOS ? `<span class="planos-hint" style="align-self:center;">${lista.length ? 'Puedes agregar ' + (MAX_PLANOS - lista.length) + ' más' : 'Sin planos'}</span>` : '');
+  cont.querySelectorAll('[data-quitar-plano]').forEach(b=>b.onclick = ()=>alQuitar(+b.dataset.quitarPlano));
+}
+function leerComoDataUrl(file){
+  return new Promise((res, rej)=>{ const r = new FileReader(); r.onload = e=>res(e.target.result); r.onerror = rej; r.readAsDataURL(file); });
+}
+async function agregarArchivos(files, lista, avisoEl){
+  const errores = [];
+  for(const file of files){
+    if(lista.length >= MAX_PLANOS){ errores.push(`Máximo ${MAX_PLANOS} planos por pedido.`); break; }
+    const esPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
+    try{
+      if(esPdf){
+        if(file.size > MAX_MB_PDF*1024*1024){ errores.push(`"${file.name}" pesa más de ${MAX_MB_PDF} MB.`); continue; }
+        lista.push({ data: await leerComoDataUrl(file), tipo:'pdf', nombre:file.name });
+      } else if(file.type.startsWith('image/')){
+        lista.push({ data: await compressImage(file), tipo:'img', nombre:file.name });
+      } else errores.push(`"${file.name}" no es imagen ni PDF.`);
+    }catch(err){ errores.push(`No se pudo leer "${file.name}".`); }
+  }
+  avisoEl.innerHTML = errores.length ? `<span class="hint" style="color:var(--red)">${errores.map(escapeHtml).join('<br>')}</span>` : '';
+}
+function planosParaGuardar(lista){
+  return lista.map(p => p.data ? { data:p.data, tipo:p.tipo, nombre:p.nombre||'' } : { url:p.url, tipo:p.tipo||'img', nombre:p.nombre||'' });
+}
 
 function compressImage(file, maxWidth=1000, quality=0.72){
   return new Promise((resolve, reject)=>{
@@ -1048,18 +1099,18 @@ function compressImage(file, maxWidth=1000, quality=0.72){
   });
 }
 
+function pintarPlanosNuevo(){
+  pintarPlanos(document.getElementById('f_imagen_preview'), planosNuevo, i=>{ planosNuevo.splice(i,1); pintarPlanosNuevo(); });
+}
 document.getElementById('f_imagen').addEventListener('change', async (e)=>{
-  const file = e.target.files[0];
-  const preview = document.getElementById('f_imagen_preview');
-  if(!file){ pendingImageData = null; preview.innerHTML=''; return; }
-  preview.innerHTML = '<span class="hint">Procesando imagen...</span>';
-  try{
-    pendingImageData = await compressImage(file);
-    preview.innerHTML = `<img src="${pendingImageData}" style="max-width:100%;max-height:180px;border:1px solid var(--border);border-radius:3px;" />`;
-  }catch(err){
-    pendingImageData = null;
-    preview.innerHTML = '<span class="hint" style="color:var(--red)">No se pudo cargar la imagen.</span>';
-  }
+  const files = [...e.target.files]; e.target.value = '';
+  if(!files.length) return;
+  const cont = document.getElementById('f_imagen_preview');
+  cont.insertAdjacentHTML('beforeend', '<span class="hint">Procesando…</span>');
+  let aviso = document.getElementById('f_planos_aviso');
+  if(!aviso){ aviso = document.createElement('div'); aviso.id = 'f_planos_aviso'; cont.after(aviso); }
+  await agregarArchivos(files, planosNuevo, aviso);
+  pintarPlanosNuevo();
 });
 
 async function loadOrders(){
@@ -1152,9 +1203,15 @@ async function saveOrders(){
         }
         return false;
       }
+      if(parsed.planos){
+        Object.keys(parsed.planos).forEach(id=>{
+          const o = ORDERS.find(x=>x.id===id);
+          if(o){ o.planos = parsed.planos[id].planos; o.imagen = parsed.planos[id].imagen || null; }
+        });
+      }
       if(parsed.imageErrors && parsed.imageErrors.length){
         const detalle = parsed.imageErrors.map(e => e.code + ': ' + e.error).join('\n');
-        alert('⚠️ El pedido se guardó, pero el plano NO se pudo subir a Google Drive.\n\nDetalle técnico (mándale captura de esto a Claude):\n' + detalle);
+        alert('⚠️ El pedido se guardó, pero uno o más planos NO se pudieron subir a Google Drive.\n\nDetalle técnico (mándale captura de esto a Claude):\n' + detalle);
       }
       suppressPollUntil = Date.now() + 10000;
       return true;
@@ -1581,7 +1638,8 @@ function renderCard(o){
 
   // Miniatura del plano si el pedido tiene uno adjunto, en vez de solo el
   // clip 📎 — se ve de inmediato si hay algo que revisar, sin dar clic.
-  const thumbHtml = o.imagen ? `<img class="plano-thumb" src="${driveImgUrl(o.imagen)}" alt="Plano adjunto" loading="lazy" />` : '';
+  const primeraImagen = planosDe(o).find(p=>p.tipo !== 'pdf');
+  const thumbHtml = primeraImagen ? `<img class="plano-thumb" src="${srcPlano(primeraImagen)}" alt="Plano adjunto" loading="lazy" />` : '';
 
   // Botones rápidos de avanzar/devolver etapa directo en la tarjeta.
   // Existen porque arrastrar (drag & drop) solo funciona con mouse — los
@@ -1615,7 +1673,7 @@ function renderCard(o){
   div.innerHTML = `
     <div class="hole"></div>
     <div class="card-top">
-      <div class="code">${o.code}${o.imagen ? ' 📎' : ''}</div>
+      <div class="code">${o.code}${planosDe(o).length ? ' 📎' + (planosDe(o).length > 1 ? planosDe(o).length : '') : ''}</div>
       ${daysBadgeHtml}
     </div>
     ${thumbHtml}
@@ -1725,7 +1783,8 @@ async function createOrder(){
     code: genCode(),
     cliente, producto, specs, cantidad, prioridad, fechaEntrega,
     instalar, lugarEntrega, direccionEntrega,
-    imagen: pendingImageData || null,
+    planos: planosParaGuardar(planosNuevo),
+    imagen: null,
     currentStage: 'ventas',
     createdAt: t,
     history: [{ stage:'ventas', enteredAt:t, exitedAt:null, enteredBy: currentUser(), note:'' }]
@@ -1742,8 +1801,8 @@ async function createOrder(){
   document.getElementById('f_direccion_wrap').style.display = 'none';
   document.getElementById('f_cantidad').value = 1;
   document.getElementById('f_imagen').value = '';
-  document.getElementById('f_imagen_preview').innerHTML = '';
-  pendingImageData = null;
+  planosNuevo = []; pintarPlanosNuevo();
+  const fa = document.getElementById('f_planos_aviso'); if(fa) fa.innerHTML = '';
   render();
 }
 
@@ -1762,10 +1821,6 @@ function driveImgUrl(url){
   return url;
 }
 
-// pendingEditImageData: undefined = sin cambios (dejar el plano actual tal cual),
-// null = el usuario quitó el plano, string (base64) = subió un plano nuevo.
-let pendingEditImageData = undefined;
-
 function openEditModal(id){
   const o = ORDERS.find(x=>x.id===id);
   if(!o) return;
@@ -1780,18 +1835,8 @@ function openEditModal(id){
   document.getElementById('e_lugar').value = o.lugarEntrega === 'cliente' ? 'cliente' : 'planta';
   document.getElementById('e_direccion').value = o.direccionEntrega || '';
   document.getElementById('e_direccion_wrap').style.display = o.lugarEntrega === 'cliente' ? '' : 'none';
-  pendingEditImageData = undefined;
-
-  const current = document.getElementById('e_imagen_current');
-  if(o.imagen){
-    current.innerHTML = `<img src="${driveImgUrl(o.imagen)}" style="max-width:100%;max-height:160px;border:1px solid var(--border);border-radius:3px;display:block;margin-bottom:6px;" /><span class="danger-link" id="e_removeImgBtn">Quitar este plano</span>`;
-    document.getElementById('e_removeImgBtn').onclick = ()=>{
-      pendingEditImageData = null;
-      current.innerHTML = '<span class="hint">Se quitará el plano al guardar los cambios.</span>';
-    };
-  } else {
-    current.innerHTML = '<span class="hint">Este pedido no tiene plano adjunto todavía.</span>';
-  }
+  planosEdit = planosDe(o).map(p=>({...p}));
+  pintarPlanosEdit();
   document.getElementById('e_imagen').value = '';
   document.getElementById('e_imagen_preview').innerHTML = '';
 
@@ -1799,18 +1844,16 @@ function openEditModal(id){
   document.getElementById('overlayEdit').classList.add('show');
 }
 
+function pintarPlanosEdit(){
+  pintarPlanos(document.getElementById('e_imagen_current'), planosEdit, i=>{ planosEdit.splice(i,1); pintarPlanosEdit(); });
+}
 document.getElementById('e_imagen').addEventListener('change', async (e)=>{
-  const file = e.target.files[0];
-  const preview = document.getElementById('e_imagen_preview');
-  if(!file){ return; }
-  preview.innerHTML = '<span class="hint">Procesando imagen...</span>';
-  try{
-    pendingEditImageData = await compressImage(file);
-    preview.innerHTML = `<img src="${pendingEditImageData}" style="max-width:100%;max-height:180px;border:1px solid var(--border);border-radius:3px;" />`;
-  }catch(err){
-    pendingEditImageData = undefined;
-    preview.innerHTML = '<span class="hint" style="color:var(--red)">No se pudo cargar la imagen.</span>';
-  }
+  const files = [...e.target.files]; e.target.value = '';
+  if(!files.length) return;
+  const aviso = document.getElementById('e_imagen_preview');
+  aviso.innerHTML = '<span class="hint">Procesando…</span>';
+  await agregarArchivos(files, planosEdit, aviso);
+  pintarPlanosEdit();
 });
 
 async function saveEdit(){
@@ -1832,15 +1875,15 @@ async function saveEdit(){
   o.instalar = document.getElementById('e_instalar').value;
   o.lugarEntrega = document.getElementById('e_lugar').value;
   o.direccionEntrega = o.lugarEntrega === 'cliente' ? document.getElementById('e_direccion').value.trim() : '';
-  if(pendingEditImageData !== undefined){
-    o.imagen = pendingEditImageData; // null (se quitó) o base64 nuevo
-  }
+  o.planos = planosParaGuardar(planosEdit);
+  const primeraImg = planosEdit.find(p=>p.tipo !== 'pdf' && p.url);
+  o.imagen = primeraImg ? primeraImg.url : null;   // el servidor la actualiza al subir las nuevas
   const ok = await saveOrders();
   if(!ok){
     Object.assign(o, backup);
     return;
   }
-  pendingEditImageData = undefined;
+  planosEdit = [];
   closeOverlay('overlayEdit');
   render();
 }
@@ -1858,7 +1901,9 @@ function openDetail(id){
     ${textoEntrega(o) ? escapeHtml(textoEntrega(o)) + '<br/>' : ''}
     ${o.specs ? 'Especificaciones: '+escapeHtml(o.specs) : ''}
     ${o.cancelled ? `<div style="margin-top:8px;color:var(--red);">✕ Cancelado el ${fmtDate(o.cancelledAt)} por ${escapeHtml(o.cancelledBy||'')}${o.cancelReason ? ' — Motivo: '+escapeHtml(o.cancelReason) : ''}</div>` : ''}
-    ${o.imagen ? `<div style="margin-top:10px;"><img src="${driveImgUrl(o.imagen)}" style="max-width:100%;max-height:280px;border:1px solid var(--border);border-radius:3px;" /></div>` : ''}
+    ${planosDe(o).length ? `<div class="planos-detalle">${planosDe(o).map((p,i)=>p.tipo==='pdf'
+        ? `<a class="plano-item plano-pdf" href="${escapeHtml(p.url||'')}" target="_blank" rel="noopener"><b>📄</b><span>${escapeHtml(p.nombre||'Ver PDF')}</span><span style="color:var(--accent,#A58100);font-weight:600;">Abrir PDF</span></a>`
+        : `<a class="plano-item" href="${escapeHtml(p.url ? driveImgUrl(p.url) : '#')}" target="_blank" rel="noopener" title="Ver plano ${i+1} en grande"><img src="${srcPlano(p)}" alt="Plano ${i+1}" /></a>`).join('')}</div>` : ''}
   `;
   const tl = document.getElementById('d_timeline');
   tl.innerHTML = '';
