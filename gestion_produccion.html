@@ -171,6 +171,8 @@
     display:flex;
     gap:0;
     overflow-x:auto;
+    will-change:scroll-position;      /* desplazamiento en su propia capa: sin pixelado */
+    -webkit-overflow-scrolling:touch;
     padding:10px 26px 30px;
   }
   .col{
@@ -222,6 +224,7 @@
 
   /* ---------- ORDER CARD (traveler tag) ---------- */
   .card{
+    contain:layout style;             /* cada tarjeta se calcula aparte: menos trabajo al desplazar */
     background:var(--panel);
     border:1px solid var(--border);
     border-left:4px solid var(--border);
@@ -1046,9 +1049,15 @@ function planosDe(o){
   return o.imagen ? [{url:o.imagen, tipo:'img', nombre:''}] : [];
 }
 function srcPlano(p){ return p.data || (p.tipo === 'pdf' ? p.url : driveImgUrl(p.url)); }
+// Versión pequeña para tarjetas y listas: así el tablero no redibuja fotos enormes al desplazarse
+function miniPlano(p){
+  if(p.data) return p.data;
+  const u = driveImgUrl(p.url) || '';
+  return /lh3\.googleusercontent\.com\/d\/[^=?]+$/.test(u) ? u + '=w360' : u;
+}
 function pintarPlanos(cont, lista, alQuitar){
   cont.innerHTML = lista.map((p,i)=>`<div class="plano-item${p.tipo==='pdf'?' plano-pdf':''}">
-      ${p.tipo==='pdf' ? `<b>📄</b><span>${escapeHtml(p.nombre || 'PDF')}</span>` : `<img src="${srcPlano(p)}" alt="Plano ${i+1}">`}
+      ${p.tipo==='pdf' ? `<b>📄</b><span>${escapeHtml(p.nombre || 'PDF')}</span>` : `<img src="${miniPlano(p)}" alt="Plano ${i+1}" decoding="async">`}
       <button type="button" class="plano-quitar" data-quitar-plano="${i}" aria-label="Quitar plano ${i+1}">×</button>
     </div>`).join('') + (lista.length < MAX_PLANOS ? `<span class="planos-hint" style="align-self:center;">${lista.length ? 'Puedes agregar ' + (MAX_PLANOS - lista.length) + ' más' : 'Sin planos'}</span>` : '');
   cont.querySelectorAll('[data-quitar-plano]').forEach(b=>b.onclick = ()=>alQuitar(+b.dataset.quitarPlano));
@@ -1639,7 +1648,7 @@ function renderCard(o){
   // Miniatura del plano si el pedido tiene uno adjunto, en vez de solo el
   // clip 📎 — se ve de inmediato si hay algo que revisar, sin dar clic.
   const primeraImagen = planosDe(o).find(p=>p.tipo !== 'pdf');
-  const thumbHtml = primeraImagen ? `<img class="plano-thumb" src="${srcPlano(primeraImagen)}" alt="Plano adjunto" loading="lazy" />` : '';
+  const thumbHtml = primeraImagen ? `<img class="plano-thumb" src="${miniPlano(primeraImagen)}" alt="Plano adjunto" loading="lazy" decoding="async" width="200" height="64" />` : '';
 
   // Botones rápidos de avanzar/devolver etapa directo en la tarjeta.
   // Existen porque arrastrar (drag & drop) solo funciona con mouse — los
@@ -1903,7 +1912,7 @@ function openDetail(id){
     ${o.cancelled ? `<div style="margin-top:8px;color:var(--red);">✕ Cancelado el ${fmtDate(o.cancelledAt)} por ${escapeHtml(o.cancelledBy||'')}${o.cancelReason ? ' — Motivo: '+escapeHtml(o.cancelReason) : ''}</div>` : ''}
     ${planosDe(o).length ? `<div class="planos-detalle">${planosDe(o).map((p,i)=>p.tipo==='pdf'
         ? `<a class="plano-item plano-pdf" href="${escapeHtml(p.url||'')}" target="_blank" rel="noopener"><b>📄</b><span>${escapeHtml(p.nombre||'Ver PDF')}</span><span style="color:var(--accent,#A58100);font-weight:600;">Abrir PDF</span></a>`
-        : `<a class="plano-item" href="${escapeHtml(p.url ? driveImgUrl(p.url) : '#')}" target="_blank" rel="noopener" title="Ver plano ${i+1} en grande"><img src="${srcPlano(p)}" alt="Plano ${i+1}" /></a>`).join('')}</div>` : ''}
+        : `<a class="plano-item" href="${escapeHtml(p.url ? driveImgUrl(p.url) : '#')}" target="_blank" rel="noopener" title="Ver plano ${i+1} en grande"><img src="${miniPlano(p)}" alt="Plano ${i+1}" decoding="async" /></a>`).join('')}</div>` : ''}
   `;
   const tl = document.getElementById('d_timeline');
   tl.innerHTML = '';
