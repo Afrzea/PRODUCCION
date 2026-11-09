@@ -2723,14 +2723,30 @@ function renderSecciones(){
   const interior = document.getElementById('boardScrollTopInner');
   const board = document.getElementById('board');
   if(!arriba || !board) return;
+  // El recorrido de la barra debe ser EXACTAMENTE el del tablero; si no, al llegar
+  // a un extremo uno empuja y el otro devuelve, y la imagen tiembla.
+  let anchoPrevio = -1, fuente = null;
   function medir(){
     if(board.clientWidth === 0) return;                 // tablero oculto: no decidir nada
-    interior.style.width = board.scrollWidth + 'px';
-    arriba.classList.toggle('sin-desborde', board.scrollWidth <= board.clientWidth + 2);
-    if(Math.abs(arriba.scrollLeft - board.scrollLeft) > 1) arriba.scrollLeft = board.scrollLeft;
+    const recorrido = board.scrollWidth - board.clientWidth;
+    arriba.classList.toggle('sin-desborde', recorrido <= 2);
+    const ancho = recorrido + arriba.clientWidth;
+    if(ancho !== anchoPrevio){ interior.style.width = ancho + 'px'; anchoPrevio = ancho; }
+    if(!fuente && Math.abs(arriba.scrollLeft - board.scrollLeft) > 1) arriba.scrollLeft = board.scrollLeft;
   }
-  arriba.addEventListener('scroll', ()=>{ if(Math.abs(board.scrollLeft - arriba.scrollLeft) > 1) board.scrollLeft = arriba.scrollLeft; });
-  board.addEventListener('scroll', ()=>{ if(Math.abs(arriba.scrollLeft - board.scrollLeft) > 1) arriba.scrollLeft = board.scrollLeft; });
+  function soltar(){ requestAnimationFrame(()=>requestAnimationFrame(()=>{ fuente = null; })); }
+  arriba.addEventListener('scroll', ()=>{
+    if(fuente === 'board') return;
+    fuente = 'arriba';
+    if(Math.abs(board.scrollLeft - arriba.scrollLeft) > 1) board.scrollLeft = arriba.scrollLeft;
+    soltar();
+  }, {passive:true});
+  board.addEventListener('scroll', ()=>{
+    if(fuente === 'arriba') return;
+    fuente = 'board';
+    if(Math.abs(arriba.scrollLeft - board.scrollLeft) > 1) arriba.scrollLeft = board.scrollLeft;
+    soltar();
+  }, {passive:true});
   new MutationObserver(()=>requestAnimationFrame(medir)).observe(board, {childList:true, subtree:true});
   if('ResizeObserver' in window) new ResizeObserver(()=>medir()).observe(board);
   window.addEventListener('resize', medir);
