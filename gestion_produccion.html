@@ -164,15 +164,21 @@
   #boardScrollTop::-webkit-scrollbar-thumb{background:var(--accent, #A58100);border-radius:6px;}
   #boardScrollTopInner{height:1px;}
   #boardScrollTop.sin-desborde{display:none;}
-  @media (max-width:760px){ #boardScrollTop{display:none;} }
+  #boardScrollBottom{overflow-x:auto;overflow-y:hidden;height:16px;margin:0 26px 18px;}
+  #boardScrollBottom::-webkit-scrollbar{height:12px;}
+  #boardScrollBottom::-webkit-scrollbar-thumb{background:var(--accent, #A58100);border-radius:6px;}
+  #boardScrollBottomInner{height:1px;}
+  #boardScrollBottom.sin-desborde{display:none;}
+  /* En computador el tablero se mueve SOLO por código (barras, rueda del mouse, arrastre):
+     su barra propia hacía que algunos equipos dibujaran pedazos de tarjetas fuera de lugar */
+  @media (min-width:761px){ #board{overflow-x:hidden !important;} }
+  @media (max-width:760px){ #boardScrollTop,#boardScrollBottom{display:none;} }
 
   /* ---------- BOARD ---------- */
   #board{
     display:flex;
     gap:0;
     overflow-x:auto;
-    will-change:scroll-position;      /* desplazamiento en su propia capa: sin pixelado */
-    -webkit-overflow-scrolling:touch;
     padding:10px 26px 30px;
   }
   .col{
@@ -224,7 +230,6 @@
 
   /* ---------- ORDER CARD (traveler tag) ---------- */
   .card{
-    contain:layout style;             /* cada tarjeta se calcula aparte: menos trabajo al desplazar */
     background:var(--panel);
     border:1px solid var(--border);
     border-left:4px solid var(--border);
@@ -664,6 +669,7 @@
 <div id="boardWrap">
 <div id="boardScrollTop" aria-hidden="true"><div id="boardScrollTopInner"></div></div>
 <div id="board"></div>
+<div id="boardScrollBottom" aria-hidden="true"><div id="boardScrollBottomInner"></div></div>
 </div>
 
 <div class="bottleneck-section" id="bottleneckSection">
@@ -2728,40 +2734,56 @@ function renderSecciones(){
    desde el escritorio del portal o desde otra pestaña). Si el tablero está oculto
    no se mide, para que la barra no quede escondida por error. */
 (function(){
-  const arriba = document.getElementById('boardScrollTop');
-  const interior = document.getElementById('boardScrollTopInner');
   const board = document.getElementById('board');
-  if(!arriba || !board) return;
-  // El recorrido de la barra debe ser EXACTAMENTE el del tablero; si no, al llegar
-  // a un extremo uno empuja y el otro devuelve, y la imagen tiembla.
-  let anchoPrevio = -1, fuente = null;
+  const barras = [['boardScrollTop','boardScrollTopInner'],['boardScrollBottom','boardScrollBottomInner']]
+    .map(([b,i])=>({ el:document.getElementById(b), interior:document.getElementById(i) })).filter(x=>x.el);
+  if(!board || !barras.length) return;
+  let fuente = null;
+  function soltar(){ requestAnimationFrame(()=>requestAnimationFrame(()=>{ fuente = null; })); }
+  // El recorrido de cada barra es EXACTAMENTE el del tablero (si no, al llegar al extremo rebota)
   function medir(){
     if(board.clientWidth === 0) return;                 // tablero oculto: no decidir nada
     const recorrido = board.scrollWidth - board.clientWidth;
-    arriba.classList.toggle('sin-desborde', recorrido <= 2);
-    const ancho = recorrido + arriba.clientWidth;
-    if(ancho !== anchoPrevio){ interior.style.width = ancho + 'px'; anchoPrevio = ancho; }
-    if(!fuente && Math.abs(arriba.scrollLeft - board.scrollLeft) > 1) arriba.scrollLeft = board.scrollLeft;
+    barras.forEach(b=>{
+      b.el.classList.toggle('sin-desborde', recorrido <= 2);
+      const ancho = recorrido + b.el.clientWidth;
+      if(b.ancho !== ancho){ b.interior.style.width = ancho + 'px'; b.ancho = ancho; }
+      if(!fuente && Math.abs(b.el.scrollLeft - board.scrollLeft) > 1) b.el.scrollLeft = board.scrollLeft;
+    });
   }
-  function soltar(){ requestAnimationFrame(()=>requestAnimationFrame(()=>{ fuente = null; })); }
-  arriba.addEventListener('scroll', ()=>{
-    if(fuente === 'board') return;
-    fuente = 'arriba';
-    if(Math.abs(board.scrollLeft - arriba.scrollLeft) > 1) board.scrollLeft = arriba.scrollLeft;
+  barras.forEach(b=>b.el.addEventListener('scroll', ()=>{
+    if(fuente && fuente !== b.el) return;
+    fuente = b.el;
+    if(Math.abs(board.scrollLeft - b.el.scrollLeft) > 1) board.scrollLeft = b.el.scrollLeft;   // mover por código
+    barras.forEach(o=>{ if(o !== b && Math.abs(o.el.scrollLeft - b.el.scrollLeft) > 1) o.el.scrollLeft = b.el.scrollLeft; });
     soltar();
-  }, {passive:true});
+  }, {passive:true}));
   board.addEventListener('scroll', ()=>{
-    if(fuente === 'arriba') return;
-    fuente = 'board';
-    if(Math.abs(arriba.scrollLeft - board.scrollLeft) > 1) arriba.scrollLeft = board.scrollLeft;
+    if(fuente) return;
+    fuente = board;
+    barras.forEach(o=>{ if(Math.abs(o.el.scrollLeft - board.scrollLeft) > 1) o.el.scrollLeft = board.scrollLeft; });
     soltar();
   }, {passive:true});
+  // Rueda del mouse / touchpad: desplazamiento lateral por código
+  board.addEventListener('wheel', e=>{
+    if(getComputedStyle(board).overflowX !== 'hidden') return;           // celular: normal
+    const dx = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : (e.shiftKey ? e.deltaY : 0);
+    if(!dx) return;
+    e.preventDefault();
+    board.scrollLeft += dx;
+  }, {passive:false});
+  // Al arrastrar una tarjeta cerca de los bordes, el tablero se corre solo
+  board.addEventListener('dragover', e=>{
+    const r = board.getBoundingClientRect(), margen = 70, paso = 24;
+    if(e.clientX < r.left + margen) board.scrollLeft -= paso;
+    else if(e.clientX > r.right - margen) board.scrollLeft += paso;
+  });
   new MutationObserver(()=>requestAnimationFrame(medir)).observe(board, {childList:true, subtree:true});
   if('ResizeObserver' in window) new ResizeObserver(()=>medir()).observe(board);
   window.addEventListener('resize', medir);
   document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) setTimeout(medir, 50); });
   window.addEventListener('focus', ()=>setTimeout(medir, 50));
-  setInterval(medir, 3000);                              // respaldo por si algo cambió sin aviso
+  setInterval(medir, 3000);
   medir();
 })();
 </script>
